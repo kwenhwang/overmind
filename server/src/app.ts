@@ -1,19 +1,24 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { digestSchema, waveDesignSchema, directiveTool } from './schema'
-import { SYSTEM_PROMPT, buildUserMessage } from './prompt'
+import { digestSchema, waveDesignSchema } from './schema'
+import { callLlm, pickProvider } from './llm'
 
 export interface Env {
-  ANTHROPIC_API_KEY: string
+  /** 우선 사용 (gpt-5.4-mini 기본) */
+  OPENAI_API_KEY?: string
+  ANTHROPIC_API_KEY?: string
+  /** 'openai' | 'anthropic' — 미설정 시 키 존재 순서로 자동 */
+  PROVIDER?: string
   /** 쉼표 구분 허용 오리진. 미설정 시 로컬 개발용 전체 허용 */
   ALLOWED_ORIGINS?: string
   MODEL?: string
-  /** 일일 LLM 호출 상한 (기본 2000 ≈ $4~5). 최종 방어선은 Anthropic 콘솔의 워크스페이스 지출 한도 */
+  /** gpt-5 계열 reasoning_effort (기본 'none', 'off'면 파라미터 제외) */
+  REASONING_EFFORT?: string
+  /** 일일 LLM 호출 상한 (기본 2000). 최종 방어선은 프로바이더 콘솔의 지출 한도 */
   MAX_DAILY_CALLS?: string
 }
 
 const RATE_LIMIT_PER_MIN = 10
-const DEFAULT_MODEL = 'claude-haiku-4-5'
 
 // 인메모리 카운터 — CF Worker는 아이솔레이트별이라 근사치지만,
 // 진짜 상한은 Anthropic 콘솔 지출 한도가 담당한다 (다층 방어의 한 층일 뿐).
@@ -55,6 +60,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   app.get('/health', (c) => c.json({ ok: true }))
 
   app.post('/directive', async (c) => {
+    console.log('directive_request', new Date().toISOString())
     const env = getEnv(c)
     const ip =
       c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
@@ -64,37 +70,15 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     const parsed = digestSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ fallback: true, reason: 'bad_input' }, 400)
 
-    if (!env.ANTHROPIC_API_KEY) return c.json({ fallback: true, reason: 'no_key' })
+    if (!pickProvider(env)) return c.json({ fallback: true, reason: 'no_key' })
     if (overDailyBudget(Number(env.MAX_DAILY_CALLS) || 2000))
       return c.json({ fallback: true, reason: 'budget' })
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: env.MODEL || DEFAULT_MODEL,
-          max_tokens: 500,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: buildUserMessage(parsed.data) }],
-          tools: [directiveTool],
-          tool_choice: { type: 'tool', name: directiveTool.name },
-        }),
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok) {
-        console.error('anthropic_error', res.status, await res.text().catch(() => ''))
-        return c.json({ fallback: true, reason: 'llm_error' })
-      }
-      const msg = (await res.json()) as { content?: { type: string; input?: unknown }[] }
-      const toolUse = msg.content?.find((b) => b.type === 'tool_use')
-      const design = waveDesignSchema.safeParse(toolUse?.input)
+      const raw = await callLlm(env, parsed.data)
+      const design = waveDesignSchema.safeParse(raw)
       if (!design.success) {
-        console.error('schema_mismatch', JSON.stringify(toolUse?.input).slice(0, 300))
+        console.error('schema_mismatch', JSON.stringify(raw)?.slice(0, 300))
         return c.json({ fallback: true, reason: 'schema_mismatch' })
       }
       return c.json({ ...design.data, fallback: false })

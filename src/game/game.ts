@@ -101,8 +101,10 @@ export class Game {
 
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
-      // 디자인이 도착했고 최소 연출 시간이 지났으면 시작
-      if (this.intermissionTimer <= 0 || (this.pendingDesign && this.intermissionTimer < WAVE_INTERMISSION_SEC - 2)) {
+      const elapsed = WAVE_INTERMISSION_SEC - this.intermissionTimer
+      // LLM 설계가 도착했으면 최소 연출 시간(2.5초) 후 시작.
+      // 미도착이면 유예(-4초)까지 기다렸다가 폴백으로 시작 — "재구성 중" 연출이 지연을 흡수.
+      if ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -4) {
         this.startWave()
       }
     } else {

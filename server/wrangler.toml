@@ -3,10 +3,10 @@ main = "src/worker.ts"
 compatibility_date = "2026-07-01"
 
 # 시크릿 (커밋 금지 — wrangler secret put으로 주입):
-#   ANTHROPIC_API_KEY
+#   OPENAI_API_KEY (기본 프로바이더) 또는 ANTHROPIC_API_KEY
 # 일반 변수:
 [vars]
-MODEL = "claude-haiku-4-5"
+MODEL = "gpt-5.4-mini"
 MAX_DAILY_CALLS = "2000"
 # 배포 후 GitHub Pages 도메인으로 교체: "https://<user>.github.io"
 # ALLOWED_ORIGINS = ""

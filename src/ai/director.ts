@@ -7,7 +7,9 @@ import type { TelemetryDigest, WaveDesign } from './schema'
  */
 
 const ENDPOINTS: string[] = [
-  // 배포 시 채워짐: 'https://api.naru.build/overmind', 'https://<standby>.workers.dev/overmind'
+  // 개발 오버라이드 (.env.local의 VITE_PROXY_URL) 우선, 그 뒤 프로덕션 엔드포인트
+  ...(import.meta.env.VITE_PROXY_URL ? [import.meta.env.VITE_PROXY_URL] : []),
+  // CF Worker 배포 후 추가: 'https://overmind-proxy.<account>.workers.dev'
 ]
 const TIMEOUT_MS = 6000
 
