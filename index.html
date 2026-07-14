@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>OVERMIND</title>
+  <link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <div id="hp-wrap"><div id="hp-bar"></div></div>
+    <div id="wave-label"></div>
+    <div id="taunt" class="hidden"></div>
+    <div id="intermission" class="hidden"></div>
+  </div>
+  <div id="screen" class="hidden">
+    <h1 id="screen-title"></h1>
+    <p id="screen-desc"></p>
+    <button id="screen-btn">START</button>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0b0f; }
+body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; color: #e8e8ec; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hp-wrap {
+  position: absolute; left: 24px; bottom: 24px; width: 260px; height: 14px;
+  background: #1c1e26; border: 1px solid #3a3d4d; border-radius: 3px; overflow: hidden;
+}
+#hp-bar { height: 100%; width: 100%; background: linear-gradient(90deg, #4ade80, #22c55e); transition: width .15s ease-out; }
+#hp-bar.low { background: linear-gradient(90deg, #f87171, #dc2626); }
+#wave-label {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 15px; letter-spacing: .35em; color: #9ca0b8; text-transform: uppercase;
+}
+#taunt {
+  position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  max-width: 640px; padding: 10px 18px; text-align: center;
+  font-size: 17px; line-height: 1.5; color: #ffb86b;
+  background: rgba(12, 10, 8, .72); border: 1px solid #5a4632; border-radius: 8px;
+  text-shadow: 0 0 12px rgba(255, 140, 40, .35);
+}
+#intermission {
+  position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 22px; letter-spacing: .2em; color: #7dd3fc; text-align: center;
+  text-shadow: 0 0 16px rgba(56, 189, 248, .5);
+}
+.hidden { display: none !important; }
+
+#screen {
+  position: fixed; inset: 0; display: flex; flex-direction: column; gap: 18px;
+  align-items: center; justify-content: center; background: rgba(6, 7, 10, .88); z-index: 10;
+}
+#screen h1 { font-size: 44px; letter-spacing: .3em; }
+#screen p { color: #9ca0b8; max-width: 560px; text-align: center; line-height: 1.7; white-space: pre-line; }
+#screen button {
+  pointer-events: auto; cursor: pointer; margin-top: 8px;
+  padding: 12px 44px; font-size: 16px; letter-spacing: .25em;
+  color: #0a0b0f; background: #e8e8ec; border: 0; border-radius: 4px;
+}
+#screen button:hover { background: #ffb86b; }
