@@ -1,0 +1,31 @@
+{
+  "skillOverrides": {
+    "api-region-normalization": "user-invocable-only",
+    "code-review-parallel": "user-invocable-only",
+    "complex-id-mapping": "user-invocable-only",
+    "data-pipeline": "user-invocable-only",
+    "data-pipeline-test": "user-invocable-only",
+    "docker-rebuild": "user-invocable-only",
+    "duckdb-query-opt": "user-invocable-only",
+    "enrichment-check": "user-invocable-only",
+    "fastapi-secure-api": "user-invocable-only",
+    "infra-security": "user-invocable-only",
+    "kwater-deploy": "user-invocable-only",
+    "pm-reporting": "user-invocable-only",
+    "python-antipattern-fix": "user-invocable-only",
+    "region-id-mapping": "user-invocable-only",
+    "subagent-patterns": "user-invocable-only",
+    "supabase-oauth": "user-invocable-only",
+    "tdd-workflow": "user-invocable-only",
+    "README": "user-invocable-only",
+    "c": "user-invocable-only",
+    "d": "user-invocable-only",
+    "db": "user-invocable-only",
+    "e": "user-invocable-only",
+    "h": "user-invocable-only",
+    "p": "user-invocable-only",
+    "r": "user-invocable-only",
+    "s": "user-invocable-only",
+    "t": "user-invocable-only"
+  }
+}

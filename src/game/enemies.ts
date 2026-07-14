@@ -38,7 +38,16 @@ export class Enemy {
       type === 'brute'
         ? new THREE.BoxGeometry(spec.radius * 1.8, 1.8, spec.radius * 1.8)
         : new THREE.OctahedronGeometry(spec.radius * 1.15)
-    this.mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.5 }))
+    this.mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: spec.color,
+        roughness: 0.35,
+        metalness: 0.3,
+        emissive: spec.color,
+        emissiveIntensity: 0.45,
+      }),
+    )
     this.mesh.position.copy(this.pos).setY(0.9)
     this.mesh.castShadow = true
     scene.add(this.mesh)

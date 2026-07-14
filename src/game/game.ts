@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, ENEMY_TYPES } from './config'
 import { World } from './world'
-import { Input } from './input'
+import { Input, IS_TOUCH } from './input'
 import { Player } from './player'
 import { Enemy } from './enemies'
 import { ProjectilePool } from './projectiles'
@@ -27,6 +27,7 @@ export class Game {
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
+  private fpsProbe = { frames: 0, start: 0, done: false }
 
   constructor(canvas: HTMLCanvasElement) {
     this.world = new World(canvas)
@@ -43,7 +44,9 @@ export class Game {
     } else {
       this.hud.showScreen(
         'OVERMIND',
-        '적의 두뇌는 너를 관찰한다.\nWASD 이동 · Space 대시 · 좌클릭 근접 · 우클릭 원거리',
+        IS_TOUCH
+          ? '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
+          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n같은 패턴을 반복하면 반드시 처벌당한다.\n\nWASD 이동 · Space 대시(무적) · 좌클릭 근접 · 우클릭 원거리',
         'START',
         () => this.startRun(),
       )
@@ -71,8 +74,10 @@ export class Game {
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
     const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+    this.hud.showReport(digest) // 오버마인드가 "본 것"을 플레이어에게 노출
     requestWaveDesign(digest).then((design) => {
       this.pendingDesign = design
+      this.hud.showCounter(design.counterReason)
     })
   }
 
@@ -82,6 +87,7 @@ export class Game {
     this.wave++
     this.state = 'playing'
     this.hud.hideIntermission()
+    this.hud.hideReport()
     this.hud.setWave(this.wave, TOTAL_WAVES)
     this.hud.showTaunt(design.taunt)
     this.telemetry.resetWaveStats()
@@ -90,6 +96,17 @@ export class Game {
   }
 
   update(dt: number): void {
+    // 첫 3초(실시간) fps 실측 — 24fps 미만이면 블룸 오프 (저사양 심사 기기 대응)
+    if (!this.fpsProbe.done) {
+      if (this.fpsProbe.start === 0) this.fpsProbe.start = performance.now()
+      this.fpsProbe.frames++
+      const realSec = (performance.now() - this.fpsProbe.start) / 1000
+      if (realSec >= 3) {
+        this.fpsProbe.done = true
+        if (this.fpsProbe.frames / realSec < 24) this.world.disableBloom()
+      }
+    }
+
     if (this.state === 'title' || this.state === 'gameover' || this.state === 'victory') {
       this.world.render()
       return
@@ -123,6 +140,17 @@ export class Game {
   }
 
   private updateCombat(dt: number): void {
+    // 모바일: 최근접 적 자동 조준·공격 (이동과 회피에 집중하는 조작 체계)
+    if (IS_TOUCH) {
+      const nearest = this.findNearestEnemy()
+      if (nearest) {
+        _toEnemy.copy(nearest.pos).sub(this.player.pos)
+        _toEnemy.y = 0
+        const dist = _toEnemy.length()
+        this.player.autoCombat(_toEnemy.normalize(), dist)
+      }
+    }
+
     const attacks = this.player.consumeAttacks()
     if (attacks.melee) {
       this.telemetry.recordMelee()
@@ -153,6 +181,20 @@ export class Game {
       if (this.wave >= TOTAL_WAVES) this.endRun(true)
       else this.startIntermission()
     }
+  }
+
+  private findNearestEnemy(): Enemy | null {
+    let best: Enemy | null = null
+    let bestDist = Infinity
+    for (const e of this.enemies) {
+      if (e.dead) continue
+      const d = e.pos.distanceToSquared(this.player.pos)
+      if (d < bestDist) {
+        bestDist = d
+        best = e
+      }
+    }
+    return best
   }
 
   /** 근접 공격: 전방 부채꼴 범위 판정 */

@@ -1,0 +1,23 @@
+import { chromium, devices } from 'playwright'
+const OUT = process.env.OUT ?? '.'
+const browser = await chromium.launch({ args: ['--no-sandbox', '--enable-unsafe-swiftshader'] })
+const ctx = await browser.newContext({ ...devices['iPhone 13'] })
+const mob = await ctx.newPage()
+mob.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 200)))
+await mob.goto('http://localhost:5199/?nobloom')
+await mob.waitForTimeout(1200)
+await mob.tap('#screen-btn')
+await mob.waitForTimeout(1500)
+const started = await mob.evaluate(() => window.__dbg?.())
+console.log('after START tap:', JSON.stringify(started))
+// 조이스틱 드래그
+const cdp = await ctx.newCDPSession(mob)
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 90, y: 480, id: 1 }] })
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 140, y: 430, id: 1 }] })
+await mob.waitForTimeout(800)
+const joyVisible = await mob.$eval('#joy-base', (el) => !el.classList.contains('hidden'))
+console.log('joystick visible:', joyVisible)
+await mob.screenshot({ path: `${OUT}/shot-mobile-play2.png` })
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+await browser.close()
+console.log('MOBILE_CHECK_DONE')

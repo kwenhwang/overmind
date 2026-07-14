@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, PLAYER } from './config'
-import type { Input } from './input'
+import { IS_TOUCH, type Input } from './input'
 
 const _move = new THREE.Vector3()
 const _aim = new THREE.Vector3()
@@ -25,7 +25,12 @@ export class Player {
   onDash?: (dir: THREE.Vector3, facing: THREE.Vector3) => void
 
   constructor(scene: THREE.Scene) {
-    this.bodyMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.4 })
+    this.bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x4ade80,
+      roughness: 0.35,
+      emissive: 0x22c55e,
+      emissiveIntensity: 0.5,
+    })
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER.radius, 0.7, 4, 12), this.bodyMat)
     body.position.y = 0.9
     body.castShadow = true
@@ -42,6 +47,22 @@ export class Player {
 
   get isDashing(): boolean {
     return this.dashTimer > 0
+  }
+
+  /**
+   * 모바일 자동 전투: 최근접 적 방향으로 조준하고 사거리에 맞는 공격을 자동 발동.
+   * 데스크톱과 동일한 쿨다운을 쓰므로 밸런스 왜곡 없음.
+   */
+  autoCombat(nearestDir: THREE.Vector3 | null, nearestDist: number): void {
+    if (!nearestDir) return
+    this.facing.copy(nearestDir)
+    if (nearestDist <= PLAYER.melee.range && this.meleeCooldown <= 0) {
+      this.meleeCooldown = PLAYER.melee.cooldown
+      this.wantsMelee = true
+    } else if (nearestDist > PLAYER.melee.range && this.rangedCooldown <= 0) {
+      this.rangedCooldown = PLAYER.ranged.cooldown
+      this.wantsRanged = true
+    }
   }
 
   update(dt: number, input: Input): void {
@@ -71,10 +92,12 @@ export class Player {
       this.pos.multiplyScalar((ARENA_RADIUS - PLAYER.radius) / r)
     }
 
-    // 조준 방향 = 마우스 지면 포인트
-    _aim.copy(input.aimPoint).sub(this.pos)
-    _aim.y = 0
-    if (_aim.lengthSq() > 0.01) this.facing.copy(_aim).normalize()
+    // 조준 방향 = 마우스 지면 포인트 (터치 모드는 autoCombat이 최근접 적으로 조준)
+    if (!IS_TOUCH) {
+      _aim.copy(input.aimPoint).sub(this.pos)
+      _aim.y = 0
+      if (_aim.lengthSq() > 0.01) this.facing.copy(_aim).normalize()
+    }
 
     // 공격 요청
     if ((input.meleePressed || input.meleeKeyHeld) && this.meleeCooldown <= 0) {
