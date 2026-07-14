@@ -1,11 +1,16 @@
 import * as THREE from 'three'
-import { PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, ENEMY_TYPES } from './config'
+import {
+  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, ENEMY_TYPES, SCORE,
+} from './config'
 import { World } from './world'
 import { Input, IS_TOUCH } from './input'
 import { Player } from './player'
 import { Enemy } from './enemies'
 import { ProjectilePool } from './projectiles'
-import { executeWaveDesign } from './waves'
+import { planWaveSpawns, spawnEnemies, createSpawnMarkers, type SpawnPlan } from './waves'
+import { Effects } from './effects'
+import { sfx } from './sfx'
+import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
 import { requestWaveDesign, fallbackDesign } from '../ai/director'
 import type { WaveDesign } from '../ai/schema'
@@ -15,10 +20,18 @@ type State = 'title' | 'playing' | 'intermission' | 'gameover' | 'victory'
 
 const _toEnemy = new THREE.Vector3()
 
+interface PendingSpawn {
+  plan: SpawnPlan[]
+  aggression: number
+  timer: number
+  markers: THREE.Mesh[]
+}
+
 export class Game {
   private world: World
   private input: Input
   private hud = new Hud()
+  private effects: Effects
   private player!: Player
   private enemies: Enemy[] = []
   private projectiles: ProjectilePool
@@ -27,16 +40,25 @@ export class Game {
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
+  private pendingSpawn: PendingSpawn | null = null
+  private score = 0
+  private combo = 0
+  private comboTimer = 0
   private fpsProbe = { frames: 0, start: 0, done: false }
 
   constructor(canvas: HTMLCanvasElement) {
     this.world = new World(canvas)
     this.input = new Input(this.world.camera)
     this.projectiles = new ProjectilePool(this.world.scene)
+    this.effects = new Effects(this.world.scene, this.world.camera)
+
+    events.on('lungeWarn', () => sfx.lungeWarn())
+    events.on('spitterShot', () => sfx.shoot())
+
     // 헤드리스 검증용 상태 훅 (콘솔 출력 없음)
     ;(window as unknown as Record<string, unknown>).__dbg = () => ({
       state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
-      hp: this.player?.hp, enemies: this.enemies.length,
+      hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
     })
     // ?autostart — 헤드리스 검증·영상 촬영용 즉시 시작
     if (new URLSearchParams(location.search).has('autostart')) {
@@ -57,12 +79,20 @@ export class Game {
     for (const e of this.enemies) this.world.scene.remove(e.mesh)
     this.enemies = []
     this.projectiles.clear()
+    this.effects.clear()
+    this.clearPendingSpawn()
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
-    this.player.onDash = (dir, facing) => this.telemetry.recordDash(dir, facing)
+    this.player.onDash = (dir, facing) => {
+      this.telemetry.recordDash(dir, facing)
+      sfx.dash()
+    }
     this.telemetry = new Telemetry()
     this.wave = 0
+    this.score = 0
+    this.combo = 0
+    this.hud.setScore(0, 0)
     this.startIntermission()
   }
 
@@ -90,9 +120,25 @@ export class Game {
     this.hud.hideReport()
     this.hud.setWave(this.wave, TOTAL_WAVES)
     this.hud.showTaunt(design.taunt)
+    sfx.taunt()
     this.telemetry.resetWaveStats()
     this.telemetry.startWave()
-    this.enemies = executeWaveDesign(design, this.player.pos, this.player.facing, this.world.scene)
+
+    // 스폰은 경고 링 텔레그래프 후 — "의도된 배치"로 읽히게
+    const plan = planWaveSpawns(design, this.player.pos, this.player.facing)
+    this.pendingSpawn = {
+      plan,
+      aggression: design.aggression,
+      timer: SPAWN_TELEGRAPH_SEC,
+      markers: createSpawnMarkers(plan, this.world.scene),
+    }
+  }
+
+  private clearPendingSpawn(): void {
+    if (this.pendingSpawn) {
+      for (const m of this.pendingSpawn.markers) this.world.scene.remove(m)
+      this.pendingSpawn = null
+    }
   }
 
   update(dt: number): void {
@@ -112,9 +158,13 @@ export class Game {
       return
     }
 
+    // 히트스톱: 전투 시간만 느려지고 카메라·이펙트 감쇠는 실시간
+    const combatDt = dt * this.effects.timeScale(dt)
+    const hpAtFrameStart = this.player.hp
+
     this.input.updateAim()
-    this.player.update(dt, this.input)
-    this.telemetry.tick(dt, this.player.pos)
+    this.player.update(combatDt, this.input)
+    this.telemetry.tick(combatDt, this.player.pos)
 
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
@@ -125,18 +175,54 @@ export class Game {
         this.startWave()
       }
     } else {
-      this.updateCombat(dt)
+      this.updateSpawnTelegraph(combatDt)
+      this.updateCombat(combatDt)
     }
 
-    this.projectiles.update(dt)
+    this.projectiles.update(combatDt)
     this.resolveProjectileHits()
 
+    // 콤보 감쇠
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt
+      if (this.comboTimer <= 0) {
+        this.combo = 0
+        this.hud.setScore(this.score, 0)
+      }
+    }
+
+    // 피격 연출 (피해 출처 불문 일원화)
+    if (this.player.hp < hpAtFrameStart) {
+      sfx.playerHurt()
+      this.effects.shake(0.55)
+      this.effects.damageNumber(this.player.pos, `-${Math.round(hpAtFrameStart - this.player.hp)}`, 'player')
+    }
+
+    this.effects.update(combatDt)
     this.hud.setHp((this.player.hp / PLAYER.hp) * 100)
     this.world.followCamera(this.player.pos, dt)
+    this.effects.applyShake(this.world.camera, dt)
     this.world.render()
     this.input.endFrame()
 
     if (this.player.hp <= 0) this.endRun(false)
+  }
+
+  private updateSpawnTelegraph(dt: number): void {
+    if (!this.pendingSpawn) return
+    this.pendingSpawn.timer -= dt
+    const blink = Math.sin(performance.now() * 0.02) * 0.35 + 0.55
+    for (const m of this.pendingSpawn.markers) {
+      ;(m.material as THREE.MeshBasicMaterial).opacity = blink
+      m.rotation.z += dt * 3
+    }
+    if (this.pendingSpawn.timer <= 0) {
+      const { plan, aggression } = this.pendingSpawn
+      this.clearPendingSpawn()
+      this.enemies = spawnEnemies(plan, aggression, this.world.scene)
+      for (const e of this.enemies) this.effects.burst(e.pos, e.color, 4, 4)
+      sfx.waveStart()
+    }
   }
 
   private updateCombat(dt: number): void {
@@ -154,10 +240,13 @@ export class Game {
     const attacks = this.player.consumeAttacks()
     if (attacks.melee) {
       this.telemetry.recordMelee()
+      sfx.meleeSwing()
+      this.effects.meleeArc(this.player.pos, this.player.facing, PLAYER.melee.range, PLAYER.melee.arcDeg)
       this.meleeSweep()
     }
     if (attacks.ranged) {
       this.telemetry.recordRanged()
+      sfx.shoot()
       this.projectiles.spawn(
         this.player.pos, this.player.facing, PLAYER.ranged.speed, PLAYER.ranged.damage, true,
       )
@@ -171,16 +260,31 @@ export class Game {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i]
       if (e.dead) {
-        this.telemetry.recordKill(e.type)
+        this.onEnemyKilled(e)
         this.world.scene.remove(e.mesh)
         this.enemies.splice(i, 1)
       }
     }
 
-    if (this.enemies.length === 0) {
+    if (this.enemies.length === 0 && !this.pendingSpawn) {
+      this.score += SCORE.waveClear
+      this.hud.setScore(this.score, this.combo)
       if (this.wave >= TOTAL_WAVES) this.endRun(true)
       else this.startIntermission()
     }
+  }
+
+  private onEnemyKilled(e: Enemy): void {
+    this.telemetry.recordKill(e.type)
+    sfx.enemyDie()
+    this.effects.burst(e.pos, e.color, 14, 8)
+    this.effects.shake(0.25)
+    this.combo++
+    this.comboTimer = 3
+    const gained = SCORE[e.type] * this.combo
+    this.score += gained
+    this.effects.damageNumber(e.pos, `+${gained}`, 'score')
+    this.hud.setScore(this.score, this.combo)
   }
 
   private findNearestEnemy(): Enemy | null {
@@ -197,16 +301,27 @@ export class Game {
     return best
   }
 
-  /** 근접 공격: 전방 부채꼴 범위 판정 */
+  /** 근접 공격: 전방 부채꼴 범위 판정 + 넉백 + 히트스톱 */
   private meleeSweep(): void {
     const cosHalfArc = Math.cos((PLAYER.melee.arcDeg / 2) * (Math.PI / 180))
+    let hitAny = false
     for (const e of this.enemies) {
       _toEnemy.copy(e.pos).sub(this.player.pos)
       _toEnemy.y = 0
       const dist = _toEnemy.length()
       if (dist > PLAYER.melee.range + ENEMY_TYPES[e.type].radius) continue
       _toEnemy.normalize()
-      if (_toEnemy.dot(this.player.facing) >= cosHalfArc) e.takeDamage(PLAYER.melee.damage)
+      if (_toEnemy.dot(this.player.facing) >= cosHalfArc) {
+        e.takeDamage(PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11)
+        this.effects.burst(e.pos, 0xd9f99d, 5, 5)
+        this.effects.damageNumber(e.pos, String(PLAYER.melee.damage))
+        hitAny = true
+      }
+    }
+    if (hitAny) {
+      sfx.meleeHit()
+      this.effects.hitstop(0.055)
+      this.effects.shake(0.18)
     }
   }
 
@@ -218,7 +333,11 @@ export class Game {
           if (e.dead) continue
           const hitDist = p.radius + ENEMY_TYPES[e.type].radius
           if (p.pos.distanceToSquared(e.pos) < hitDist * hitDist) {
-            e.takeDamage(p.damage)
+            _toEnemy.copy(p.vel).setY(0).normalize()
+            e.takeDamage(p.damage, _toEnemy, 3)
+            sfx.enemyHit()
+            this.effects.burst(e.pos, 0xa5f3fc, 3, 4)
+            this.effects.damageNumber(e.pos, String(p.damage))
             p.dead = true
             break
           }
@@ -237,11 +356,16 @@ export class Game {
 
   private endRun(victory: boolean): void {
     this.state = victory ? 'victory' : 'gameover'
+    if (victory) sfx.victory()
+    else sfx.defeat()
+    const best = Math.max(this.score, Number(localStorage.getItem('overmind-best') ?? 0))
+    localStorage.setItem('overmind-best', String(best))
     this.hud.showScreen(
       victory ? 'OVERMIND 정지' : 'OVERMIND 승리',
-      victory
+      (victory
         ? '너는 예측을 벗어났다.'
-        : '"예측대로였다." — 오버마인드는 너의 패턴을 학습했다.',
+        : '"예측대로였다." — 오버마인드는 너의 패턴을 학습했다.') +
+        `\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}`,
       'RETRY',
       () => this.startRun(),
     )

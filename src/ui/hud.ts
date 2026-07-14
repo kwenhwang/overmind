@@ -24,6 +24,14 @@ export class Hud {
     this.waveLabel.textContent = `WAVE ${current} / ${total}`
   }
 
+  setScore(score: number, combo: number): void {
+    const scoreEl = document.getElementById('score')
+    if (!scoreEl) return
+    scoreEl.innerHTML =
+      `<span class="score-num">${score.toLocaleString()}</span>` +
+      (combo >= 2 ? `<span class="combo">×${combo}</span>` : '')
+  }
+
   /** 조롱 대사 — 한 글자씩 타이핑 (AI가 말하는 질감) */
   showTaunt(text: string, seconds = 7): void {
     clearTimeout(this.tauntTimer)

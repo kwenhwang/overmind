@@ -51,6 +51,31 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   color: #ffb86b; font-weight: 600;
 }
 
+#score {
+  position: absolute; top: 18px; right: 24px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#score .score-num { font-size: 26px; font-weight: 700; color: #e8e8ec; letter-spacing: .05em; }
+#score .combo {
+  display: block; font-size: 17px; font-weight: 700; color: #ffb86b;
+  text-shadow: 0 0 10px rgba(255, 140, 40, .6); animation: combo-pop .18s ease-out;
+}
+@keyframes combo-pop { from { transform: scale(1.6); } to { transform: scale(1); } }
+
+#numbers { position: absolute; inset: 0; overflow: hidden; }
+.dmg {
+  position: absolute; transform: translate(-50%, -50%);
+  font-size: 17px; font-weight: 800; color: #f1f5f9;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+  animation: dmg-float .75s ease-out forwards; pointer-events: none;
+}
+.dmg.score { color: #fbbf24; font-size: 15px; }
+.dmg.player { color: #f87171; font-size: 21px; }
+@keyframes dmg-float {
+  from { opacity: 1; margin-top: 0; }
+  to { opacity: 0; margin-top: -46px; }
+}
+
 #joy-base {
   position: absolute; width: 128px; height: 128px; border-radius: 50%;
   border: 2px solid rgba(74, 222, 128, .35); background: rgba(74, 222, 128, .07);

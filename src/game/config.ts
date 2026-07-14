@@ -12,10 +12,11 @@ export const PLAYER = {
 } as const
 
 export const ENEMY_TYPES = {
-  // 근접 돌격형
+  // 근접 돌격형 — 멈춰서 예고(windup) 후 돌진(lunge). 돌진만이 유일한 피해 수단 → 회피 가능
   drone: {
     radius: 0.5, speed: 5.2, hp: 30, damage: 10,
-    attackRange: 1.3, attackCooldown: 1.1, color: 0xd94f4f,
+    attackRange: 4.5, attackCooldown: 1.6, color: 0xd94f4f,
+    windup: 0.45, lungeSpeed: 17, lungeDuration: 0.35,
   },
   // 원거리 견제형 — 거리 유지 후 투사체
   spitter: {
@@ -34,3 +35,7 @@ export type EnemyType = keyof typeof ENEMY_TYPES
 
 export const WAVE_INTERMISSION_SEC = 4.5
 export const TOTAL_WAVES = 5
+/** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
+export const SPAWN_TELEGRAPH_SEC = 0.9
+
+export const SCORE = { drone: 100, spitter: 150, brute: 300, waveClear: 500 } as const

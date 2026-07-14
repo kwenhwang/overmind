@@ -1,36 +1,60 @@
 import * as THREE from 'three'
-import { ARENA_RADIUS } from './config'
+import { ARENA_RADIUS, type EnemyType } from './config'
 import { Enemy } from './enemies'
 import type { WaveDesign } from '../ai/schema'
 
+export interface SpawnPlan {
+  type: EnemyType
+  pos: THREE.Vector3
+}
+
 /**
- * 웨이브 실행기 — L2가 설계한 WaveDesign(데이터)을 실제 스폰으로 실행하는 결정론 계층.
+ * 웨이브 실행기 1단계 — L2가 설계한 WaveDesign(데이터)을 스폰 좌표 목록으로 변환.
+ * 실제 스폰은 경고 링 텔레그래프 후 Game이 spawnEnemies로 실행.
  */
-export function executeWaveDesign(
+export function planWaveSpawns(
   design: WaveDesign,
   playerPos: THREE.Vector3,
   playerFacing: THREE.Vector3,
-  scene: THREE.Scene,
-): Enemy[] {
-  const enemies: Enemy[] = []
-  const flat: Enemy['type'][] = []
+): SpawnPlan[] {
+  const flat: EnemyType[] = []
   for (const s of design.spawns) for (let i = 0; i < s.count; i++) flat.push(s.type)
 
   const baseAngle = biasAngle(design.spawnBias, playerPos, playerFacing)
   const spread = design.spawnBias === 'surround' ? Math.PI * 2 : Math.PI / 2.5
 
-  flat.forEach((type, i) => {
+  return flat.map((type, i) => {
     const t = flat.length > 1 ? i / (flat.length - 1) : 0.5
     const angle = baseAngle + (t - 0.5) * spread + (Math.random() - 0.5) * 0.2
     const dist = ARENA_RADIUS * (0.55 + Math.random() * 0.35)
     const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist)
     // 플레이어 바로 위 스폰 방지
     if (pos.distanceTo(playerPos) < 5) pos.multiplyScalar(-0.8)
-    const enemy = new Enemy(type, pos, scene)
-    enemy.aggression = design.aggression
-    enemies.push(enemy)
+    return { type, pos }
   })
-  return enemies
+}
+
+/** 웨이브 실행기 2단계 — 계획된 좌표에 실제 스폰 */
+export function spawnEnemies(plan: SpawnPlan[], aggression: number, scene: THREE.Scene): Enemy[] {
+  return plan.map(({ type, pos }) => {
+    const enemy = new Enemy(type, pos, scene)
+    enemy.aggression = aggression
+    return enemy
+  })
+}
+
+/** 스폰 예고 마커 — 붉은 경고 링 */
+export function createSpawnMarkers(plan: SpawnPlan[], scene: THREE.Scene): THREE.Mesh[] {
+  return plan.map(({ pos }) => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.8, 24),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+    )
+    ring.rotation.x = -Math.PI / 2
+    ring.position.copy(pos).setY(0.08)
+    scene.add(ring)
+    return ring
+  })
 }
 
 /** 스폰 편향 → 월드 각도. left/right는 플레이어 시선 기준 */
