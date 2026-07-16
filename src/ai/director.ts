@@ -1,4 +1,4 @@
-import type { TelemetryDigest, WaveDesign } from './schema'
+import type { RunContext, TelemetryDigest, WaveDesign } from './schema'
 
 /**
  * L2 디렉터 클라이언트.
@@ -12,23 +12,52 @@ const ENDPOINTS: string[] = [
   'https://overmind-proxy.kwenhwang.workers.dev',
 ]
 const TIMEOUT_MS = 6000
+const PROFILE_KEY = 'overmind-profile'
+const RUNS_KEY = 'overmind-runs'
+const OUTCOME_KEY = 'overmind-last-outcome'
 
 let seq = 0
 
+/** 판을 넘는 기억 — localStorage 관리 */
+export const memory = {
+  profile: (): string => localStorage.getItem(PROFILE_KEY) ?? '',
+  saveProfile(text: string): void {
+    if (text.trim()) localStorage.setItem(PROFILE_KEY, text.slice(0, 600))
+  },
+  runContext(): RunContext {
+    const outcome = localStorage.getItem(OUTCOME_KEY)
+    const [kind, wave] = (outcome ?? 'none:0').split(':')
+    return {
+      runNumber: Number(localStorage.getItem(RUNS_KEY) ?? 1),
+      lastOutcome: kind === 'died' || kind === 'victory' ? kind : 'none',
+      diedAtWave: Number(wave) || 0,
+      profile: this.profile(),
+    }
+  },
+  startRun(): void {
+    localStorage.setItem(RUNS_KEY, String(Number(localStorage.getItem(RUNS_KEY) ?? 0) + 1))
+  },
+  endRun(victory: boolean, wave: number): void {
+    localStorage.setItem(OUTCOME_KEY, `${victory ? 'victory' : 'died'}:${wave}`)
+  },
+}
+
 export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDesign> {
   const mySeq = ++seq
+  const body = JSON.stringify({ ...digest, ...memory.runContext() })
   for (const base of ENDPOINTS) {
     try {
       const res = await fetch(`${base}/directive`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(digest),
+        body,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       })
       if (!res.ok) continue
       const data = (await res.json()) as WaveDesign & { fallback?: boolean }
       if (data.fallback) break // 서버 예산 캡 → 폴백
       if (mySeq !== seq) break // 낡은 응답 폐기
+      memory.saveProfile(data.profileUpdate ?? '')
       return sanitize(data)
     } catch {
       // 다음 엔드포인트로 페일오버
@@ -73,6 +102,7 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
       ? '근접 위주 전투 감지 — 원거리 유닛으로 거리를 벌린다'
       : '원거리 위주 전투 감지 — 돌격 유닛으로 압박한다',
     taunt: TAUNT_POOL[wave % TAUNT_POOL.length],
+    profileUpdate: '', // 폴백은 기억을 갱신하지 않음 (기존 프로파일 유지)
     mood: digest.playerHpPct < 35 ? 'confident' : 'angry',
     aggression: Math.min(5, 2 + Math.floor(wave / 2)) as WaveDesign['aggression'],
   }

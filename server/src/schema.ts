@@ -21,6 +21,15 @@ export const digestSchema = z.object({
     })
     .strict(),
   waveClearSeconds: z.number().min(0).max(3600),
+  // ── 판(run)을 넘는 컨텍스트 ──
+  runNumber: z.number().int().min(1).max(9999).default(1),
+  lastOutcome: z.enum(['none', 'died', 'victory']).default('none'),
+  diedAtWave: z.number().int().min(0).max(20).default(0),
+  /**
+   * LLM이 누적해 온 관찰 기록 (클라이언트 localStorage 경유 왕복).
+   * 유일한 자유 문자열 입력 — 길이 제한 + 프롬프트에서 데이터로만 취급하도록 가드.
+   */
+  profile: z.string().max(600).default(''),
 })
 
 export type Digest = z.infer<typeof digestSchema>
@@ -57,6 +66,7 @@ export const waveDesignSchema = z.object({
   spawnBias: z.enum(['surround', 'front', 'behind', 'left', 'right']),
   counterReason: z.string().max(300),
   taunt: z.string().max(300),
+  profileUpdate: z.string().max(600),
   mood: z.enum(['confident', 'angry', 'playful', 'desperate']),
   aggression: z.number().int().min(1).max(5),
 })
@@ -121,9 +131,16 @@ export const directiveTool = {
         type: 'string',
         description: '플레이어에게 보내는 조롱 대사 1~2문장 (한국어). 반드시 관찰한 구체적 수치나 습관을 언급',
       },
+      profileUpdate: {
+        type: 'string',
+        description:
+          '플레이어에 대한 누적 관찰 기록의 갱신본 (한국어 3문장 이내). 기존 기록에 이번 웨이브에서 확인된 새 사실을 통합. 판을 넘어 유지되는 너의 기억이다',
+      },
       mood: { type: 'string', enum: ['confident', 'angry', 'playful', 'desperate'] },
       aggression: { type: 'integer', minimum: 1, maximum: 5, description: '적 공격성' },
     },
-    required: ['spawns', 'hazards', 'spawnBias', 'counterReason', 'taunt', 'mood', 'aggression'],
+    required: [
+      'spawns', 'hazards', 'spawnBias', 'counterReason', 'taunt', 'profileUpdate', 'mood', 'aggression',
+    ],
   },
 } as const

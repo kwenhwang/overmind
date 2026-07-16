@@ -40,8 +40,25 @@ export interface WaveDesign {
   counterReason: string
   /** 오버마인드 조롱 대사 (한국어 1~2문장) */
   taunt: string
+  /**
+   * 플레이어에 대한 누적 관찰 기록 갱신 (3문장 이내) — localStorage에 저장되어
+   * 웨이브·판(run)을 넘어 이어진다. 다음 판의 오버마인드가 "지난 판의 너"를 기억하는 근거.
+   */
+  profileUpdate: string
   mood: 'confident' | 'angry' | 'playful' | 'desperate'
   aggression: 1 | 2 | 3 | 4 | 5
+}
+
+/** 판(run) 경계를 넘는 컨텍스트 — 디렉터 요청에 다이제스트와 함께 실림 */
+export interface RunContext {
+  /** 몇 번째 판인가 (localStorage 누적) */
+  runNumber: number
+  /** 직전 판의 결말 */
+  lastOutcome: 'none' | 'died' | 'victory'
+  /** 직전 판에서 죽은 웨이브 (died일 때만 의미) */
+  diedAtWave: number
+  /** LLM이 누적해 온 플레이어 관찰 기록 (없으면 빈 문자열) */
+  profile: string
 }
 
 export interface Directive {

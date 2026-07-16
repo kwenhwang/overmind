@@ -13,7 +13,7 @@ import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, fallbackDesign } from '../ai/director'
+import { requestWaveDesign, fallbackDesign, memory } from '../ai/director'
 import type { WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
@@ -98,6 +98,7 @@ export class Game {
     this.score = 0
     this.combo = 0
     this.hud.setScore(0, 0)
+    memory.startRun()
     this.startIntermission()
   }
 
@@ -110,7 +111,7 @@ export class Game {
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
     const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
-    this.hud.showReport(digest) // 오버마인드가 "본 것"을 플레이어에게 노출
+    this.hud.showReport(digest, memory.profile()) // 오버마인드가 "본 것"과 "기억"을 노출
     requestWaveDesign(digest).then((design) => {
       this.pendingDesign = design
       this.hud.showCounter(design.counterReason)
@@ -417,6 +418,7 @@ export class Game {
 
   private endRun(victory: boolean): void {
     this.state = victory ? 'victory' : 'gameover'
+    memory.endRun(victory, this.wave)
     if (victory) sfx.victory()
     else sfx.defeat()
     const best = Math.max(this.score, Number(localStorage.getItem('overmind-best') ?? 0))

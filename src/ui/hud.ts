@@ -2,6 +2,11 @@ import type { TelemetryDigest } from '../ai/schema'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
+/** 프로파일은 LLM 생성 + localStorage 경유라 신뢰 불가 텍스트 — innerHTML 삽입 전 이스케이프 */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+}
+
 export class Hud {
   private hpBar = $<HTMLDivElement>('hp-bar')
   private waveLabel = $<HTMLDivElement>('wave-label')
@@ -56,16 +61,21 @@ export class Hud {
     this.intermission.classList.add('hidden')
   }
 
-  /** 인터미션 관찰 리포트 — 오버마인드가 "본 것"을 그대로 보여줘 AI의 존재를 증명 */
-  showReport(d: TelemetryDigest): void {
+  /** 인터미션 관찰 리포트 — 오버마인드가 "본 것"과 "기억"을 그대로 보여줘 AI의 존재를 증명 */
+  showReport(d: TelemetryDigest, profile = ''): void {
+    const memoryRow = profile
+      ? `<div class="report-memory">기억: ${escapeHtml(profile)}</div>`
+      : ''
     if (d.wave === 0) {
       this.report.innerHTML = `<div class="report-title">OVERMIND 기동</div>
-        <div class="report-row">관측 데이터 없음 — 수집을 시작한다</div>`
+        ${memoryRow || '<div class="report-row">관측 데이터 없음 — 수집을 시작한다</div>'}
+        <div class="report-counter hidden" id="report-counter"></div>`
     } else {
       this.report.innerHTML = `<div class="report-title">관찰 리포트 — WAVE ${d.wave}</div>
         <div class="report-row">회피 편향 <b>← ${d.dodgeLeftPct}%</b> / <b>${d.dodgeRightPct}% →</b></div>
         <div class="report-row">무기 선호 근접 <b>${d.meleeUsePct}%</b> · 원거리 <b>${d.rangedUsePct}%</b></div>
         <div class="report-row">평균 위치 중심에서 <b>${Math.round(d.avgDistToCenter * 100)}%</b> · 피해 <b>${d.damageTakenThisWave}</b></div>
+        ${memoryRow}
         <div class="report-counter hidden" id="report-counter"></div>`
     }
     this.report.classList.remove('hidden')

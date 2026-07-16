@@ -46,6 +46,10 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   text-transform: uppercase;
 }
 #report .report-row b { color: #e8e8ec; }
+#report .report-memory {
+  margin-top: 8px; padding-top: 8px; border-top: 1px dashed #1e3a4a;
+  color: #c084fc; font-style: italic; font-size: 13px;
+}
 #report .report-counter {
   margin-top: 8px; padding-top: 8px; border-top: 1px solid #1e3a4a;
   color: #ffb86b; font-weight: 600;
