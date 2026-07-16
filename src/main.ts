@@ -1,8 +1,9 @@
 import { Game } from './game/game'
 import { loadModels } from './game/models'
+import { initSession } from './ai/director'
 
-// 모델 선로드 (총 ~170KB) — 실패해도 기본 도형으로 진행
-await loadModels()
+// 모델 선로드 + 세션 토큰 발급 (둘 다 실패해도 게임은 폴백으로 진행)
+await Promise.all([loadModels(), initSession()])
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const game = new Game(canvas)

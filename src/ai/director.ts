@@ -12,6 +12,22 @@ const ENDPOINTS: string[] = [
   'https://overmind-proxy.kwenhwang.workers.dev',
 ]
 const TIMEOUT_MS = 6000
+let sessionToken = ''
+
+/** 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작) */
+export async function initSession(): Promise<void> {
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/session`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) continue
+      sessionToken = ((await res.json()) as { token?: string }).token ?? ''
+      if (sessionToken) return
+    } catch {
+      /* 다음 엔드포인트 */
+    }
+  }
+}
+
 const PROFILE_KEY = 'overmind-profile'
 const RUNS_KEY = 'overmind-runs'
 const OUTCOME_KEY = 'overmind-last-outcome'
@@ -49,7 +65,7 @@ export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDe
     try {
       const res = await fetch(`${base}/directive`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
         body,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       })
@@ -58,7 +74,7 @@ export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDe
       if (data.fallback) break // 서버 예산 캡 → 폴백
       if (mySeq !== seq) break // 낡은 응답 폐기
       memory.saveProfile(data.profileUpdate ?? '')
-      return sanitize(data)
+      return sanitize(data, digest.wave + 1)
     } catch {
       // 다음 엔드포인트로 페일오버
     }
@@ -73,7 +89,7 @@ export async function requestBossDesign(digest: TelemetryDigest): Promise<BossDe
     try {
       const res = await fetch(`${base}/directive`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
         body,
         signal: AbortSignal.timeout(10_000),
       })
@@ -115,11 +131,33 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
   }
 }
 
-/** LLM 출력 최종 방어선 — 스키마는 서버가 보장하지만 수치 범위는 클라이언트도 확인 */
-function sanitize(d: WaveDesign): WaveDesign {
-  const total = d.spawns.reduce((n, s) => n + s.count, 0)
-  if (total < 1 || total > 14) return { ...d, spawns: [{ type: 'drone', count: 6 }] }
-  return d
+/**
+ * LLM 출력 최종 방어선 + 난이도 가드레일.
+ * LLM/폴백이 초반 웨이브에 과도한 구성(12기+모디파이어+해저드)을 쏟아 심사위원이
+ * 첫 판에 급사하는 것을 방지 — 웨이브 번호에 비례해 적 수·모디파이어·해저드를 클램프.
+ * (설계 의도는 유지하되 강도만 웨이브에 맞게 조인다.)
+ */
+function sanitize(d: WaveDesign, wave: number): WaveDesign {
+  const maxEnemies = Math.min(4 + Math.ceil(wave * 1.5), 12) // W1=6 … W5=12
+  const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
+  const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
+
+  let budget = maxEnemies
+  const spawns = d.spawns
+    .map((s) => {
+      const count = Math.max(1, Math.min(s.count, budget))
+      budget -= count
+      return { type: s.type, count, modifiers: (s.modifiers ?? []).slice(0, maxModsPerGroup) }
+    })
+    .filter((s) => s.count > 0 && budget >= 0 - s.count)
+  if (spawns.length === 0) spawns.push({ type: 'drone', count: Math.min(4, maxEnemies), modifiers: [] })
+
+  return {
+    ...d,
+    spawns,
+    hazards: (d.hazards ?? []).slice(0, maxHazards),
+    aggression: (wave <= 1 ? Math.min(d.aggression, 2) : d.aggression) as WaveDesign['aggression'],
+  }
 }
 
 /**

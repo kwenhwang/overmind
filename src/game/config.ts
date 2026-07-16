@@ -33,7 +33,7 @@ export const ENEMY_TYPES = {
 
 export type EnemyType = keyof typeof ENEMY_TYPES
 
-export const WAVE_INTERMISSION_SEC = 4.5
+export const WAVE_INTERMISSION_SEC = 3.5
 export const TOTAL_WAVES = 5
 /** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
 export const SPAWN_TELEGRAPH_SEC = 0.9

@@ -1,7 +1,11 @@
 /**
- * 헤드리스 프레임 단위 녹화 — 실시간 성능과 무관하게 60fps 영상 생성.
+ * ⚠ 개발 검증 전용 — 제출 영상 제작에 쓰지 말 것.
+ *   대회 규정("실제 게임 플레이 장면 중심 / AI 조작·합성 불가")상 자동조종·프레임스텝
+ *   렌더링은 제출 영상으로 부적합. 시연 영상은 사람이 실시간 플레이를 직접 녹화한다.
+ *   이 스크립트는 연출(강림·파괴 시퀀스 등)이 의도대로 보이는지 헤드리스로 확인하는 용도.
+ *
+ * 헤드리스 프레임 단위 캡처 — 실시간 성능과 무관하게 매끈한 클립 생성.
  * 사용: node tools/record.mjs <url> <초> <출력.mp4> [입력스크립트.mjs]
- * 입력스크립트: export default async function(frame, page, api) — 프레임별 연기 지시.
  */
 import { chromium } from 'playwright'
 import { spawnSync } from 'node:child_process'

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { digestSchema, waveDesignSchema, bossDesignSchema } from './schema'
 import { callLlm, pickProvider } from './llm'
+import { issueToken, verifyToken } from './token'
 
 export interface Env {
   /** 우선 사용 (gpt-5.4-mini 기본) */
@@ -16,6 +17,8 @@ export interface Env {
   REASONING_EFFORT?: string
   /** 일일 LLM 호출 상한 (기본 2000). 최종 방어선은 프로바이더 콘솔의 지출 한도 */
   MAX_DAILY_CALLS?: string
+  /** 세션 토큰 HMAC 서명 키. 미설정 시 토큰 검증 생략(하위호환) */
+  SESSION_SECRET?: string
 }
 
 const RATE_LIMIT_PER_MIN = 10
@@ -54,18 +57,31 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return cors({
       origin: origins && origins.length > 0 ? origins : '*',
       allowMethods: ['POST', 'GET', 'OPTIONS'],
+      allowHeaders: ['content-type', 'x-session-token'],
     })(c, next)
   })
 
   app.get('/health', (c) => c.json({ ok: true }))
 
+  // 게임 시작 시 1회 — 단기 서명 토큰 발급 (봇 진입 장벽)
+  app.get('/session', async (c) => {
+    const env = getEnv(c)
+    if (!env.SESSION_SECRET) return c.json({ token: '' })
+    return c.json({ token: await issueToken(env.SESSION_SECRET) })
+  })
+
   app.post('/directive', async (c) => {
-    console.log('directive_request', new Date().toISOString())
     const env = getEnv(c)
     const ip =
       c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
 
     if (rateLimited(ip)) return c.json({ fallback: true, reason: 'rate_limited' }, 429)
+
+    // 세션 토큰 검증 (SECRET 설정 시) — Origin 없는 봇/curl 차단
+    if (env.SESSION_SECRET) {
+      const ok = await verifyToken(env.SESSION_SECRET, c.req.header('x-session-token'))
+      if (!ok) return c.json({ fallback: true, reason: 'no_token' }, 401)
+    }
 
     const parsed = digestSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ fallback: true, reason: 'bad_input' }, 400)
