@@ -9,20 +9,29 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const [url, secondsArg, out, actScript] = process.argv.slice(2)
+const [url, secondsArg, out, actScript, profileDir] = process.argv.slice(2)
 if (!url || !out) {
-  console.error('usage: node tools/record.mjs <url> <seconds> <out.mp4> [act.mjs]')
+  console.error('usage: node tools/record.mjs <url> <seconds> <out.mp4> [act.mjs] [profileDir]')
   process.exit(1)
 }
 const FPS = 60
+const CAPTURE_EVERY = Math.max(1, Number(process.env.CAPTURE_EVERY || 1))
+const OUT_FPS = FPS / CAPTURE_EVERY
 const totalFrames = Math.round(Number(secondsArg || 10) * FPS)
-const act = actScript ? (await import(resolve(actScript))).default : null
+const act = actScript && actScript !== '-' ? (await import(resolve(actScript))).default : null
 
 const dir = join(tmpdir(), `ovm-rec-${Date.now()}`)
 mkdirSync(dir, { recursive: true })
 
-const browser = await chromium.launch({ args: ['--no-sandbox', '--enable-unsafe-swiftshader'] })
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+// profileDir 지정 시 영속 컨텍스트 — localStorage(프로파일 기억)가 테이크 간 유지됨
+const launchArgs = { args: ['--no-sandbox', '--enable-unsafe-swiftshader'] }
+const ctx = profileDir
+  ? await chromium.launchPersistentContext(profileDir, { ...launchArgs, viewport: { width: 1280, height: 720 } })
+  : await (async () => {
+      const b = await chromium.launch(launchArgs)
+      return b.newContext({ viewport: { width: 1280, height: 720 } })
+    })()
+const page = ctx.pages()[0] ?? (await ctx.newPage())
 page.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 300)))
 await page.goto(url)
 await page.waitForFunction(() => typeof window.__step === 'function', undefined, { timeout: 30000 })
@@ -40,25 +49,39 @@ const t0 = Date.now()
 for (let f = 0; f < totalFrames; f++) {
   if (act) await act(f, page, api)
   await page.evaluate(() => window.__step())
-  await page.screenshot({
-    path: join(dir, `f${String(f).padStart(5, '0')}.png`),
-    clip: { x: 0, y: 0, width: 1280, height: 720 },
-  })
+  // CAPTURE_EVERY=2 → 게임은 60fps 스텝, 캡처·인코딩은 30fps (제작 시간 절반)
+  if (f % CAPTURE_EVERY === 0) {
+    await page.screenshot({
+      path: join(dir, `f${String(f / CAPTURE_EVERY).padStart(5, '0')}.jpg`),
+      type: 'jpeg', quality: 88,
+      clip: { x: 0, y: 0, width: 1280, height: 720 },
+    })
+  }
   if (f % 120 === 0) {
     const el = ((Date.now() - t0) / 1000).toFixed(0)
     console.log(`frame ${f}/${totalFrames} (${el}s elapsed)`)
   }
 }
-await browser.close()
+// SFX 이벤트 로그 → 오프라인 합성 → 먹싱
+const sfxLog = await page.evaluate(() => window.__sfxLog ?? [])
+await ctx.close()
+
+const { writeFileSync } = await import('node:fs')
+const logPath = `${out}.sfx.json`
+writeFileSync(logPath, JSON.stringify(sfxLog))
+const wavPath = `${out}.wav`
+const seconds = totalFrames / FPS
+const a = spawnSync('node', [new URL('render-audio.mjs', import.meta.url).pathname, logPath, String(seconds), wavPath], { stdio: 'inherit' })
+const hasAudio = a.status === 0 && sfxLog.length > 0
 
 // 시스템 ffmpeg로 인코딩 (playwright 동봉판은 x264 미포함)
-const r = spawnSync('ffmpeg', [
-  '-y', '-framerate', String(FPS), '-i', join(dir, 'f%05d.png'),
-  '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'slow', out,
-], { stdio: ['ignore', 'ignore', 'pipe'] })
+const ffArgs = ['-y', '-framerate', String(OUT_FPS), '-i', join(dir, 'f%05d.jpg')]
+if (hasAudio) ffArgs.push('-i', wavPath, '-c:a', 'aac', '-b:a', '160k', '-shortest')
+ffArgs.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'slow', out)
+const r = spawnSync('ffmpeg', ffArgs, { stdio: ['ignore', 'ignore', 'pipe'] })
 if (r.status !== 0) {
   console.error('ffmpeg failed:', r.stderr?.toString().slice(-500))
   process.exit(1)
 }
 rmSync(dir, { recursive: true, force: true })
-console.log(`RECORDED ${out} (${totalFrames} frames)`)
+console.log(`RECORDED ${out} (${totalFrames} steps @${OUT_FPS}fps, audio=${hasAudio})`)

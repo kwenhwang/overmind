@@ -14,8 +14,14 @@ const timescale = Number(params.get('timescale')) || 1
 
 if (params.has('record')) {
   // 녹화 모드: 실시간 rAF 대신 외부(Playwright)가 __step()으로 정확히 1/60초씩 전진.
-  // 저사양 서버에서도 프레임 단위 캡처 → 60fps 인코딩으로 부드러운 영상 제작 가능.
-  ;(window as unknown as Record<string, unknown>).__step = () => game.update(1 / 60)
+  // 저사양 서버에서도 프레임 단위 캡처 → 60fps 인코딩으로 실기기 수준 영상 제작 가능.
+  const w = window as unknown as { __frame: number; __step: () => void; __typeTick?: () => void }
+  w.__frame = 0
+  w.__step = () => {
+    w.__frame++
+    w.__typeTick?.()
+    game.update(1 / 60)
+  }
 } else {
   let last = performance.now()
   function frame(now: number): void {

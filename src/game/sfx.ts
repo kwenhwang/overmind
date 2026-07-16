@@ -1,7 +1,19 @@
 /**
  * 절차 생성 SFX — 외부 오디오 에셋 없이 WebAudio 신스로 전부 해결.
  * (라이선스 이슈 0, 용량 0. 첫 사용자 입력에서 AudioContext 언락)
+ *
+ * 녹화 모드(?record): 소리 대신 {이벤트명, 프레임}을 window.__sfxLog에 기록 —
+ * tools/render-audio.mjs가 동일 신스 수식으로 오프라인 합성해 영상에 먹싱한다.
  */
+const RECORD = new URLSearchParams(location.search).has('record')
+
+function logEvent(name: string): boolean {
+  if (!RECORD) return false
+  const w = window as unknown as { __sfxLog?: { n: string; f: number }[]; __frame?: number }
+  ;(w.__sfxLog ??= []).push({ n: name, f: w.__frame ?? 0 })
+  return true
+}
+
 class Synth {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
@@ -67,34 +79,42 @@ class Synth {
 
 const s = new Synth()
 
+// 이벤트별 신스 레시피 — tools/render-audio.mjs가 같은 테이블을 사용 (동기화 주의)
 export const sfx = {
-  shoot: () => s.tone(880, 0.08, { type: 'sawtooth', slideTo: 220, volume: 0.25 }),
-  meleeSwing: () => s.noise(0.09, { volume: 0.2, filterFrom: 1200, filterTo: 400 }),
+  shoot: () => logEvent('shoot') || s.tone(880, 0.08, { type: 'sawtooth', slideTo: 220, volume: 0.25 }),
+  meleeSwing: () =>
+    logEvent('meleeSwing') || s.noise(0.09, { volume: 0.2, filterFrom: 1200, filterTo: 400 }),
   meleeHit: () => {
+    if (logEvent('meleeHit')) return
     s.noise(0.12, { volume: 0.5, filterFrom: 2500, filterTo: 300 })
     s.tone(160, 0.1, { type: 'square', slideTo: 60, volume: 0.4 })
   },
-  enemyHit: () => s.tone(300, 0.06, { type: 'triangle', slideTo: 150, volume: 0.3 }),
+  enemyHit: () => logEvent('enemyHit') || s.tone(300, 0.06, { type: 'triangle', slideTo: 150, volume: 0.3 }),
   enemyDie: () => {
+    if (logEvent('enemyDie')) return
     s.noise(0.25, { volume: 0.55, filterFrom: 4000, filterTo: 120 })
     s.tone(220, 0.2, { type: 'sawtooth', slideTo: 40, volume: 0.35 })
   },
   playerHurt: () => {
+    if (logEvent('playerHurt')) return
     s.tone(140, 0.18, { type: 'square', slideTo: 70, volume: 0.5 })
     s.noise(0.12, { volume: 0.3 })
   },
-  dash: () => s.tone(500, 0.12, { type: 'sine', slideTo: 900, volume: 0.25 }),
-  lungeWarn: () => s.tone(650, 0.12, { type: 'square', slideTo: 650, volume: 0.18 }),
+  dash: () => logEvent('dash') || s.tone(500, 0.12, { type: 'sine', slideTo: 900, volume: 0.25 }),
+  lungeWarn: () => logEvent('lungeWarn') || s.tone(650, 0.12, { type: 'square', slideTo: 650, volume: 0.18 }),
   waveStart: () => {
+    if (logEvent('waveStart')) return
     s.tone(196, 0.14, { type: 'square', volume: 0.3 })
     s.tone(294, 0.14, { type: 'square', volume: 0.3, delay: 0.12 })
     s.tone(392, 0.22, { type: 'square', volume: 0.35, delay: 0.24 })
   },
-  taunt: () => s.tone(1200, 0.05, { type: 'sine', slideTo: 1600, volume: 0.15 }),
+  taunt: () => logEvent('taunt') || s.tone(1200, 0.05, { type: 'sine', slideTo: 1600, volume: 0.15 }),
   victory: () => {
+    if (logEvent('victory')) return
     ;[262, 330, 392, 523].forEach((f, i) => s.tone(f, 0.22, { type: 'triangle', volume: 0.35, delay: i * 0.13 }))
   },
   defeat: () => {
+    if (logEvent('defeat')) return
     ;[392, 330, 262, 196].forEach((f, i) => s.tone(f, 0.3, { type: 'sawtooth', volume: 0.3, delay: i * 0.16 }))
   },
 }

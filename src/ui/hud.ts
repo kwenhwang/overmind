@@ -55,12 +55,28 @@ export class Hud {
       (combo >= 2 ? `<span class="combo">×${combo}</span>` : '')
   }
 
-  /** 조롱 대사 — 한 글자씩 타이핑 (AI가 말하는 질감) */
+  /** 조롱 대사 — 한 글자씩 타이핑 (AI가 말하는 질감). 녹화 모드는 프레임 기반 진행 */
   showTaunt(text: string, seconds = 7): void {
     clearTimeout(this.tauntTimer)
     clearInterval(this.typeTimer)
     this.taunt.textContent = ''
     this.taunt.classList.remove('hidden')
+    if (new URLSearchParams(location.search).has('record')) {
+      let chars = 0
+      let frames = 0
+      ;(window as unknown as Record<string, unknown>).__typeTick = () => {
+        frames++
+        if (chars < text.length) {
+          chars += 0.6 // 프레임당 0.6자 ≈ 실시간 타이핑 감
+          this.taunt.textContent = text.slice(0, Math.ceil(chars))
+        }
+        if (frames >= seconds * 60) {
+          this.taunt.classList.add('hidden')
+          ;(window as unknown as Record<string, unknown>).__typeTick = undefined
+        }
+      }
+      return
+    }
     let i = 0
     this.typeTimer = setInterval(() => {
       i++

@@ -22,6 +22,9 @@ type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | '
 
 const _toEnemy = new THREE.Vector3()
 
+/** 녹화 연기용 — 데스크톱에서도 모바일식 자동 조준·공격 */
+const AUTO_AIM = new URLSearchParams(location.search).has('autoaim')
+
 interface PendingSpawn {
   plan: SpawnPlan[]
   aggression: number
@@ -396,8 +399,8 @@ export class Game {
   }
 
   private updateCombat(dt: number): void {
-    // 모바일: 최근접 표적(적 또는 보스) 자동 조준·공격
-    if (IS_TOUCH) {
+    // 모바일(또는 ?autoaim — 녹화용): 최근접 표적(적 또는 보스) 자동 조준·공격
+    if (IS_TOUCH || AUTO_AIM) {
       const nearest = this.findNearestEnemy()
       let targetPos = nearest?.pos ?? null
       if (this.boss && !this.boss.dead) {
