@@ -26,13 +26,24 @@ export async function callLlm(env: Env, digest: Digest): Promise<unknown> {
   return null
 }
 
-/** directiveTool.input_schema → OpenAI strict json_schema (additionalProperties 필수) */
+/**
+ * directiveTool.input_schema → OpenAI strict json_schema.
+ * strict 모드는 모든 중첩 object에 additionalProperties:false를 요구 — 재귀로 부여.
+ */
 function openAiSchema(): Record<string, unknown> {
-  const src = directiveTool.input_schema as Record<string, unknown>
-  const props = structuredClone(src.properties) as Record<string, Record<string, unknown>>
-  const spawns = props.spawns as { items?: Record<string, unknown> }
-  if (spawns.items) spawns.items.additionalProperties = false
-  return { type: 'object', additionalProperties: false, properties: props, required: src.required }
+  const schema = structuredClone(directiveTool.input_schema) as Record<string, unknown>
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return
+    const obj = node as Record<string, unknown>
+    if (obj.type === 'object') {
+      obj.additionalProperties = false
+      const props = obj.properties as Record<string, unknown> | undefined
+      if (props) for (const v of Object.values(props)) walk(v)
+    }
+    if (obj.items) walk(obj.items)
+  }
+  walk(schema)
+  return schema
 }
 
 async function callOpenAi(env: Env, digest: Digest): Promise<unknown> {

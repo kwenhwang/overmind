@@ -10,6 +10,8 @@ export class Player {
   pos = new THREE.Vector3(0, 0, 6)
   facing = new THREE.Vector3(0, 0, -1)
   hp: number = PLAYER.hp
+  /** 해저드(감속 지대 등)가 조정하는 이동 배율 — Game이 매 프레임 설정 */
+  speedMul = 1
   private dashTimer = 0
   private dashCooldown = 0
   private dashDir = new THREE.Vector3()
@@ -83,7 +85,7 @@ export class Player {
         this.dashDir.copy(move)
         this.onDash?.(this.dashDir, this.facing)
       }
-      this.pos.addScaledVector(move, PLAYER.speed * dt)
+      this.pos.addScaledVector(move, PLAYER.speed * this.speedMul * dt)
     }
 
     // 아레나 경계

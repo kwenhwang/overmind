@@ -51,18 +51,23 @@ function sanitize(d: WaveDesign): WaveDesign {
 export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
   const wave = digest.wave + 1
   const melee = digest.meleeUsePct >= 50
+  // 규칙 기반은 단순 1:1 매핑이 한계 — LLM은 이 부품들을 상황 조합으로 설계한다
   const spawns: WaveDesign['spawns'] = melee
     ? [
         { type: 'spitter', count: Math.min(2 + wave, 6) },
-        { type: 'drone', count: wave },
+        { type: 'drone', count: wave, modifiers: wave >= 2 ? ['thorns'] : [] },
       ]
     : [
-        { type: 'drone', count: Math.min(3 + wave, 8) },
+        { type: 'drone', count: Math.min(3 + wave, 8), modifiers: wave >= 3 ? ['enrage_far'] : [] },
         { type: 'brute', count: Math.max(0, wave - 2) },
       ]
   const dodgeLeft = digest.dodgeLeftPct > 60
   return {
     spawns,
+    hazards:
+      wave >= 3
+        ? [{ type: 'spike_zone', placement: dodgeLeft ? 'player_left' : 'player_right' }]
+        : [],
     spawnBias: dodgeLeft ? 'left' : digest.dodgeRightPct > 60 ? 'right' : 'surround',
     counterReason: melee
       ? '근접 위주 전투 감지 — 원거리 유닛으로 거리를 벌린다'

@@ -1,11 +1,12 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, type EnemyType } from './config'
 import { Enemy } from './enemies'
-import type { WaveDesign } from '../ai/schema'
+import type { Modifier, WaveDesign } from '../ai/schema'
 
 export interface SpawnPlan {
   type: EnemyType
   pos: THREE.Vector3
+  modifiers: Modifier[]
 }
 
 /**
@@ -17,27 +18,28 @@ export function planWaveSpawns(
   playerPos: THREE.Vector3,
   playerFacing: THREE.Vector3,
 ): SpawnPlan[] {
-  const flat: EnemyType[] = []
-  for (const s of design.spawns) for (let i = 0; i < s.count; i++) flat.push(s.type)
+  const flat: { type: EnemyType; modifiers: Modifier[] }[] = []
+  for (const s of design.spawns)
+    for (let i = 0; i < s.count; i++) flat.push({ type: s.type, modifiers: s.modifiers ?? [] })
 
   const baseAngle = biasAngle(design.spawnBias, playerPos, playerFacing)
   const spread = design.spawnBias === 'surround' ? Math.PI * 2 : Math.PI / 2.5
 
-  return flat.map((type, i) => {
+  return flat.map(({ type, modifiers }, i) => {
     const t = flat.length > 1 ? i / (flat.length - 1) : 0.5
     const angle = baseAngle + (t - 0.5) * spread + (Math.random() - 0.5) * 0.2
     const dist = ARENA_RADIUS * (0.55 + Math.random() * 0.35)
     const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist)
     // 플레이어 바로 위 스폰 방지
     if (pos.distanceTo(playerPos) < 5) pos.multiplyScalar(-0.8)
-    return { type, pos }
+    return { type, pos, modifiers }
   })
 }
 
 /** 웨이브 실행기 2단계 — 계획된 좌표에 실제 스폰 */
 export function spawnEnemies(plan: SpawnPlan[], aggression: number, scene: THREE.Scene): Enemy[] {
-  return plan.map(({ type, pos }) => {
-    const enemy = new Enemy(type, pos, scene)
+  return plan.map(({ type, pos, modifiers }) => {
+    const enemy = new Enemy(type, pos, scene, modifiers)
     enemy.aggression = aggression
     return enemy
   })

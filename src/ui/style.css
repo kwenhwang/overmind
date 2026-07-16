@@ -70,6 +70,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   animation: dmg-float .75s ease-out forwards; pointer-events: none;
 }
 .dmg.score { color: #fbbf24; font-size: 15px; }
+.dmg.blocked { color: #60a5fa; font-size: 14px; }
 .dmg.player { color: #f87171; font-size: 21px; }
 @keyframes dmg-float {
   from { opacity: 1; margin-top: 0; }

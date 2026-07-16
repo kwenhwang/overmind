@@ -8,6 +8,7 @@ import { Player } from './player'
 import { Enemy } from './enemies'
 import { ProjectilePool } from './projectiles'
 import { planWaveSpawns, spawnEnemies, createSpawnMarkers, type SpawnPlan } from './waves'
+import { Hazard, resolveHazardPos } from './hazards'
 import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
@@ -41,6 +42,7 @@ export class Game {
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
   private pendingSpawn: PendingSpawn | null = null
+  private hazardZones: Hazard[] = []
   private score = 0
   private combo = 0
   private comboTimer = 0
@@ -76,17 +78,20 @@ export class Game {
   }
 
   private startRun(): void {
-    for (const e of this.enemies) this.world.scene.remove(e.mesh)
+    for (const e of this.enemies) this.world.scene.remove(e.root)
     this.enemies = []
     this.projectiles.clear()
     this.effects.clear()
     this.clearPendingSpawn()
+    this.clearHazards()
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
     this.player.onDash = (dir, facing) => {
       this.telemetry.recordDash(dir, facing)
       sfx.dash()
+      // mirror_dash 모디파이어: 오버마인드가 회피 자체에 반응한다
+      for (const e of this.enemies) e.mirrorDash(dir)
     }
     this.telemetry = new Telemetry()
     this.wave = 0
@@ -101,6 +106,7 @@ export class Game {
     this.state = 'intermission'
     this.intermissionTimer = WAVE_INTERMISSION_SEC
     this.pendingDesign = null
+    this.clearHazards()
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
     const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
@@ -123,6 +129,14 @@ export class Game {
     sfx.taunt()
     this.telemetry.resetWaveStats()
     this.telemetry.startWave()
+    this.world.setMood(design.mood)
+
+    // 해저드 — 텔레그래프 시점부터 보여서 배치 의도가 읽히게
+    this.clearHazards()
+    for (const h of (design.hazards ?? []).slice(0, 2)) {
+      const pos = resolveHazardPos(h.placement, this.player.pos, this.player.facing)
+      this.hazardZones.push(new Hazard(h, pos, this.world.scene))
+    }
 
     // 스폰은 경고 링 텔레그래프 후 — "의도된 배치"로 읽히게
     const plan = planWaveSpawns(design, this.player.pos, this.player.facing)
@@ -139,6 +153,11 @@ export class Game {
       for (const m of this.pendingSpawn.markers) this.world.scene.remove(m)
       this.pendingSpawn = null
     }
+  }
+
+  private clearHazards(): void {
+    for (const h of this.hazardZones) this.world.scene.remove(h.mesh)
+    this.hazardZones = []
   }
 
   update(dt: number): void {
@@ -161,6 +180,13 @@ export class Game {
     // 히트스톱: 전투 시간만 느려지고 카메라·이펙트 감쇠는 실시간
     const combatDt = dt * this.effects.timeScale(dt)
     const hpAtFrameStart = this.player.hp
+
+    // 해저드 효과 (가시 피해·감속) — 이동 계산 전에 적용
+    let speedMul = 1
+    if (this.state === 'playing') {
+      for (const h of this.hazardZones) speedMul = Math.min(speedMul, h.update(combatDt, this.player))
+    }
+    this.player.speedMul = speedMul
 
     this.input.updateAim()
     this.player.update(combatDt, this.input)
@@ -191,11 +217,13 @@ export class Game {
       }
     }
 
-    // 피격 연출 (피해 출처 불문 일원화)
+    // 피격 연출·기록 (피해 출처 불문 일원화)
     if (this.player.hp < hpAtFrameStart) {
+      const taken = hpAtFrameStart - this.player.hp
+      this.telemetry.recordDamageTaken(taken)
       sfx.playerHurt()
       this.effects.shake(0.55)
-      this.effects.damageNumber(this.player.pos, `-${Math.round(hpAtFrameStart - this.player.hp)}`, 'player')
+      this.effects.damageNumber(this.player.pos, `-${Math.round(taken)}`, 'player')
     }
 
     this.effects.update(combatDt)
@@ -252,16 +280,14 @@ export class Game {
       )
     }
 
-    const hpBefore = this.player.hp
     for (const e of this.enemies) e.update(dt, this.player, this.projectiles)
-    if (this.player.hp < hpBefore) this.telemetry.recordDamageTaken(hpBefore - this.player.hp)
 
-    // 사망 처리
+    // 사망 처리 (분열·자폭은 여기서 발동)
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i]
       if (e.dead) {
         this.onEnemyKilled(e)
-        this.world.scene.remove(e.mesh)
+        this.world.scene.remove(e.root)
         this.enemies.splice(i, 1)
       }
     }
@@ -279,6 +305,25 @@ export class Game {
     sfx.enemyDie()
     this.effects.burst(e.pos, e.color, 14, 8)
     this.effects.shake(0.25)
+
+    // split_on_death: 소형 드론 2기로 분열
+    if (e.has('split_on_death')) {
+      for (let i = 0; i < 2; i++) {
+        const offset = new THREE.Vector3(Math.cos(i * Math.PI) * 1.2, 0, Math.sin(i * Math.PI) * 1.2)
+        const mini = new Enemy('drone', e.pos.clone().add(offset), this.world.scene, [], {
+          scaleMul: 0.55,
+          hpMul: 0.35,
+        })
+        mini.aggression = e.aggression
+        this.enemies.push(mini)
+      }
+    }
+    // explode_on_death: 자폭 — 근접 처치를 처벌
+    if (e.has('explode_on_death')) {
+      this.effects.burst(e.pos, 0xf97316, 22, 11)
+      this.effects.shake(0.5)
+      if (e.pos.distanceTo(this.player.pos) < 3.4) this.player.takeDamage(15)
+    }
     this.combo++
     this.comboTimer = 3
     const gained = SCORE[e.type] * this.combo
@@ -312,10 +357,22 @@ export class Game {
       if (dist > PLAYER.melee.range + ENEMY_TYPES[e.type].radius) continue
       _toEnemy.normalize()
       if (_toEnemy.dot(this.player.facing) >= cosHalfArc) {
-        e.takeDamage(PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11)
+        const applied = e.takeDamage(
+          PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos,
+        )
+        if (!applied) {
+          this.effects.damageNumber(e.pos, '차단', 'blocked')
+          sfx.enemyHit()
+          continue
+        }
         this.effects.burst(e.pos, 0xd9f99d, 5, 5)
         this.effects.damageNumber(e.pos, String(PLAYER.melee.damage))
         hitAny = true
+        // thorns: 근접 반격 가시 — 근접 의존을 처벌
+        if (e.has('thorns') && !this.player.isDashing) {
+          this.player.takeDamage(4)
+          this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
+        }
       }
     }
     if (hitAny) {
@@ -331,13 +388,19 @@ export class Game {
       if (p.fromPlayer) {
         for (const e of this.enemies) {
           if (e.dead) continue
-          const hitDist = p.radius + ENEMY_TYPES[e.type].radius
+          const hitDist = p.radius + e.radius
           if (p.pos.distanceToSquared(e.pos) < hitDist * hitDist) {
             _toEnemy.copy(p.vel).setY(0).normalize()
-            e.takeDamage(p.damage, _toEnemy, 3)
-            sfx.enemyHit()
-            this.effects.burst(e.pos, 0xa5f3fc, 3, 4)
-            this.effects.damageNumber(e.pos, String(p.damage))
+            // 투사체의 발사 방향 반대편이 공격 출처
+            const from = p.pos.clone().addScaledVector(p.vel, -0.3)
+            const applied = e.takeDamage(p.damage, _toEnemy, 3, from)
+            if (applied) {
+              sfx.enemyHit()
+              this.effects.burst(e.pos, 0xa5f3fc, 3, 4)
+              this.effects.damageNumber(e.pos, String(p.damage))
+            } else {
+              this.effects.damageNumber(e.pos, '차단', 'blocked')
+            }
             p.dead = true
             break
           }
@@ -345,9 +408,7 @@ export class Game {
       } else {
         const hitDist = p.radius + PLAYER.radius
         if (p.pos.distanceToSquared(this.player.pos) < hitDist * hitDist) {
-          const hpBefore = this.player.hp
           this.player.takeDamage(p.damage)
-          if (this.player.hp < hpBefore) this.telemetry.recordDamageTaken(hpBefore - this.player.hp)
           p.dead = true
         }
       }

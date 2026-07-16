@@ -3,22 +3,32 @@ import { ARENA_RADIUS, ENEMY_TYPES, type EnemyType } from './config'
 import { events } from './events'
 import type { Player } from './player'
 import type { ProjectilePool } from './projectiles'
-import type { Directive } from '../ai/schema'
+import type { Directive, Modifier } from '../ai/schema'
 
 const _toPlayer = new THREE.Vector3()
 const _steer = new THREE.Vector3()
 const _side = new THREE.Vector3()
+const _toAttacker = new THREE.Vector3()
 
 type ActionName = 'chase' | 'strafe' | 'attack' | 'keepDistance'
 /** 공격 연출 단계 — 모든 피해는 예고(windup) 후에만 발생 (읽고 피할 수 있는 전투) */
 type AttackPhase = 'none' | 'windup' | 'lunge'
 
+export interface EnemyVariant {
+  scaleMul?: number
+  hpMul?: number
+}
+
 /**
  * L1 전술 계층: 유틸리티 점수로 행동 선택.
- * L2(LLM) 디렉티브는 여기의 가중치·성향을 바꾸는 데이터일 뿐, 프레임 제어는 하지 않는다.
+ * L2(LLM)는 구성·모디파이어·공격성(데이터)만 설계하고, 프레임 제어는 하지 않는다.
  */
 export class Enemy {
-  mesh: THREE.Mesh
+  /** 위치·제거의 기준 노드 (본체 회전과 분리) */
+  root: THREE.Group
+  private body: THREE.Mesh
+  private shieldBadge: THREE.Object3D | null = null
+  private orbitBadges: THREE.Object3D[] = []
   pos: THREE.Vector3
   hp: number
   dead = false
@@ -31,7 +41,11 @@ export class Enemy {
   private phaseTimer = 0
   private lungeDir = new THREE.Vector3()
   private lungeHit = false
-  private baseEmissive: number
+  private baseEmissive = 0.45
+  /** 실드 방향 — 플레이어를 천천히 추적 (등 뒤 침투의 여지) */
+  private facingDir = new THREE.Vector3(1, 0, 0)
+  private time = Math.random() * 10
+  private scaleMul: number
   /** L2 디렉티브가 조정하는 공격성 (1~5) */
   aggression = 3
 
@@ -39,16 +53,19 @@ export class Enemy {
     public type: EnemyType,
     spawnPos: THREE.Vector3,
     scene: THREE.Scene,
+    public modifiers: Modifier[] = [],
+    variant: EnemyVariant = {},
   ) {
     const spec = ENEMY_TYPES[type]
-    this.hp = spec.hp
+    this.scaleMul = variant.scaleMul ?? 1
+    this.hp = Math.round(spec.hp * (variant.hpMul ?? 1))
     this.pos = spawnPos.clone()
+
     const geo =
       type === 'brute'
         ? new THREE.BoxGeometry(spec.radius * 1.8, 1.8, spec.radius * 1.8)
         : new THREE.OctahedronGeometry(spec.radius * 1.15)
-    this.baseEmissive = 0.45
-    this.mesh = new THREE.Mesh(
+    this.body = new THREE.Mesh(
       geo,
       new THREE.MeshStandardMaterial({
         color: spec.color,
@@ -58,17 +75,88 @@ export class Enemy {
         emissiveIntensity: this.baseEmissive,
       }),
     )
-    this.mesh.position.copy(this.pos).setY(0.9)
-    this.mesh.castShadow = true
-    scene.add(this.mesh)
+    this.body.castShadow = true
+    this.body.position.y = 0.9
+
+    this.root = new THREE.Group()
+    this.root.add(this.body)
+    this.root.scale.setScalar(this.scaleMul)
+    this.buildBadges()
+    this.root.position.copy(this.pos)
+    scene.add(this.root)
   }
 
+  get radius(): number {
+    return ENEMY_TYPES[this.type].radius * this.scaleMul
+  }
   get color(): number {
     return ENEMY_TYPES[this.type].color
+  }
+  has(mod: Modifier): boolean {
+    return this.modifiers.includes(mod)
+  }
+
+  /** 모디파이어별 시각 배지 — 에셋 없이 형태·색으로 구분 */
+  private buildBadges(): void {
+    if (this.has('thorns')) {
+      const mat = new THREE.MeshStandardMaterial({ color: 0xfca5a5, emissive: 0xef4444, emissiveIntensity: 0.9 })
+      for (let i = 0; i < 4; i++) {
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), mat)
+        const a = (i / 4) * Math.PI * 2
+        spike.position.set(Math.cos(a) * 0.85, 0.9, Math.sin(a) * 0.85)
+        spike.rotation.z = -Math.PI / 2
+        spike.rotation.y = -a
+        this.root.add(spike)
+      }
+    }
+    if (this.has('shielded_front')) {
+      const arc = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.15, 1.15, 1.3, 16, 1, true, -Math.PI / 3, (Math.PI * 2) / 3),
+        new THREE.MeshBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.4, side: THREE.DoubleSide }),
+      )
+      arc.position.y = 0.9
+      this.shieldBadge = arc
+      this.root.add(arc)
+    }
+    if (this.has('split_on_death')) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xf0abfc })
+      for (let i = 0; i < 2; i++) {
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), mat)
+        this.orbitBadges.push(orb)
+        this.root.add(orb)
+      }
+    }
+    if (this.has('explode_on_death')) {
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0x7c2d12, emissive: 0xf97316, emissiveIntensity: 2 }),
+      )
+      core.position.y = 1.9
+      core.name = 'explode-core'
+      this.root.add(core)
+    }
+    if (this.has('mirror_dash')) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.9, 0.05, 6, 24),
+        new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.7 }),
+      )
+      ring.rotation.x = Math.PI / 2
+      ring.position.y = 0.15
+      this.root.add(ring)
+    }
+    if (this.has('enrage_far')) {
+      const fin = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16, 0.6, 6),
+        new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xfacc15, emissiveIntensity: 1.2 }),
+      )
+      fin.position.y = 1.8
+      this.root.add(fin)
+    }
   }
 
   update(dt: number, player: Player, projectiles: ProjectilePool): void {
     if (this.dead) return
+    this.time += dt
     const spec = ENEMY_TYPES[this.type]
     this.attackCooldown = Math.max(0, this.attackCooldown - dt)
 
@@ -76,6 +164,9 @@ export class Enemy {
     _toPlayer.y = 0
     const dist = _toPlayer.length()
     if (dist > 0.001) _toPlayer.normalize()
+
+    // 실드 방향은 플레이어를 '천천히' 추적 — 대시로 등 뒤를 잡을 수 있게
+    this.facingDir.lerp(_toPlayer, Math.min(1, dt * 2.2)).normalize()
 
     // 넉백은 조종 불가 관성 — 어떤 단계에서도 적용
     if (this.knockback.lengthSq() > 0.01) {
@@ -99,7 +190,7 @@ export class Enemy {
     this.thinkTimer -= dt
     if (this.thinkTimer <= 0) {
       this.thinkTimer = 0.1 + Math.random() * 0.2
-      this.action = this.chooseAction(player, dist)
+      this.action = this.chooseAction(dist)
     }
 
     _steer.set(0, 0, 0)
@@ -122,9 +213,20 @@ export class Enemy {
     }
 
     if (_steer.lengthSq() > 0) {
-      this.pos.addScaledVector(_steer.normalize(), spec.speed * dt)
+      // enrage_far: 플레이어가 거리를 벌리면 가속 (카이팅 처벌)
+      const enraged = this.has('enrage_far') && dist > 8
+      this.pos.addScaledVector(_steer.normalize(), spec.speed * (enraged ? 1.7 : 1) * dt)
     }
     this.applyDisplay(dt)
+  }
+
+  /** mirror_dash: 플레이어의 대시를 감지해 같은 방향으로 돌진 (Game이 호출) */
+  mirrorDash(dir: THREE.Vector3): void {
+    if (!this.has('mirror_dash') || this.dead || this.phase !== 'none') return
+    this.phase = 'lunge'
+    this.phaseTimer = 0.3
+    this.lungeDir.copy(dir).setY(0).normalize()
+    this.lungeHit = false
   }
 
   /** 공격 개시 = 예고 단계 진입 (즉발 피해 없음) */
@@ -136,15 +238,9 @@ export class Enemy {
     if (this.type === 'drone') events.emit('lungeWarn', { pos: this.pos })
   }
 
-  private updateWindup(
-    dt: number,
-    player: Player,
-    projectiles: ProjectilePool,
-    dist: number,
-  ): void {
+  private updateWindup(dt: number, player: Player, projectiles: ProjectilePool, dist: number): void {
     this.phaseTimer -= dt
-    // 예고 연출: 밝아지며 수축
-    const mat = this.mesh.material as THREE.MeshStandardMaterial
+    const mat = this.body.material as THREE.MeshStandardMaterial
     mat.emissiveIntensity = this.baseEmissive + (1 - Math.max(0, this.phaseTimer) / 0.45) * 2.2
     if (this.phaseTimer > 0) return
 
@@ -175,7 +271,7 @@ export class Enemy {
     this.phaseTimer -= dt
     this.pos.addScaledVector(this.lungeDir, ENEMY_TYPES.drone.lungeSpeed * dt)
     // 돌진 중 접촉 시에만 피해 (1회)
-    if (!this.lungeHit && this.pos.distanceTo(player.pos) < spec.radius + 0.7) {
+    if (!this.lungeHit && this.pos.distanceTo(player.pos) < this.radius + 0.7) {
       this.lungeHit = true
       player.takeDamage(spec.damage)
     }
@@ -183,18 +279,30 @@ export class Enemy {
   }
 
   private applyDisplay(dt: number): void {
-    const spec = ENEMY_TYPES[this.type]
     const r = this.pos.length()
-    if (r > ARENA_RADIUS - spec.radius) this.pos.multiplyScalar((ARENA_RADIUS - spec.radius) / r)
-    this.mesh.position.copy(this.pos).setY(0.9)
-    this.mesh.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)
+    if (r > ARENA_RADIUS - this.radius) this.pos.multiplyScalar((ARENA_RADIUS - this.radius) / r)
+    this.root.position.copy(this.pos)
+    this.body.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)
+
+    if (this.shieldBadge) {
+      this.root.rotation.y = 0
+      this.shieldBadge.rotation.y = Math.atan2(-this.facingDir.z, this.facingDir.x) - Math.PI / 2 + Math.PI / 3
+    }
+    for (let i = 0; i < this.orbitBadges.length; i++) {
+      const a = this.time * 2.4 + i * Math.PI
+      this.orbitBadges[i].position.set(Math.cos(a) * 1.1, 1.3, Math.sin(a) * 1.1)
+    }
+    const explodeCore = this.root.getObjectByName('explode-core') as THREE.Mesh | undefined
+    if (explodeCore) {
+      const pulse = 1 + Math.sin(this.time * 6) * 0.35
+      explodeCore.scale.setScalar(pulse)
+    }
   }
 
   /** 유틸리티 점수 — 각 행동의 매력을 상황 함수로 계산 */
-  private chooseAction(player: Player, dist: number): ActionName {
+  private chooseAction(dist: number): ActionName {
     const spec = ENEMY_TYPES[this.type]
     const aggro = this.aggression / 3 // 1.0 = 기본
-    void player
 
     const scores: Record<ActionName, number> = {
       chase: dist > spec.attackRange ? 0.6 * aggro : 0.1,
@@ -219,17 +327,25 @@ export class Enemy {
     return best
   }
 
-  takeDamage(amount: number, knockDir?: THREE.Vector3, knockForce = 0): void {
+  /**
+   * 피해 적용. attackerPos가 주어지고 shielded_front가 정면을 막으면 false(차단) 반환.
+   */
+  takeDamage(amount: number, knockDir?: THREE.Vector3, knockForce = 0, attackerPos?: THREE.Vector3): boolean {
+    if (attackerPos && this.has('shielded_front')) {
+      _toAttacker.copy(attackerPos).sub(this.pos).setY(0).normalize()
+      if (_toAttacker.dot(this.facingDir) > 0.35) return false // 정면 차단 — 등 뒤를 노려라
+    }
     this.hp -= amount
     if (knockDir && knockForce > 0) this.knockback.addScaledVector(knockDir, knockForce)
     if (this.hp <= 0) this.dead = true
     else {
-      const mat = this.mesh.material as THREE.MeshStandardMaterial
+      const mat = this.body.material as THREE.MeshStandardMaterial
       mat.emissive.setHex(0xffffff)
       setTimeout(() => {
         if (!this.dead) mat.emissive.setHex(ENEMY_TYPES[this.type].color)
       }, 60)
     }
+    return true
   }
 
   applyDirective(directive: Directive): void {

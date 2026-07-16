@@ -136,6 +136,14 @@ export class World {
     ringMat.emissiveIntensity = 2.0 + Math.sin(this.time * 2.1) * 0.5
   }
 
+  /** 오버마인드의 감정 상태 → 중앙 코어 색 (confident 주황 / angry 적 / playful 시안 / desperate 보라) */
+  setMood(mood: 'confident' | 'angry' | 'playful' | 'desperate'): void {
+    const core = this.scene.getObjectByName('overmind-core') as THREE.Mesh | undefined
+    if (!core) return
+    const colors = { confident: 0xff5f2e, angry: 0xdc2626, playful: 0x22d3ee, desperate: 0xa855f7 }
+    ;(core.material as THREE.MeshStandardMaterial).emissive.setHex(colors[mood])
+  }
+
   /** 초반 실측 fps가 낮으면 Game이 호출 — 블룸 없이 기본 렌더로 전환 */
   disableBloom(): void {
     this.useBloom = false
