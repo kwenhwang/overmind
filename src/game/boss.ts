@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, BOSS } from './config'
+import { instantiate, collectMats, flashMats } from './models'
 import { sfx } from './sfx'
 import type { Player } from './player'
 import type { ProjectilePool } from './projectiles'
@@ -22,8 +23,12 @@ interface Slam {
  */
 export class Boss {
   root: THREE.Group
-  private core: THREE.Mesh
-  private ring: THREE.Mesh
+  private core: THREE.Object3D
+  private ring: THREE.Object3D
+  private ring2: THREE.Object3D | null = null
+  private shards: THREE.Object3D | null = null
+  private mats: THREE.MeshStandardMaterial[] = []
+  private baseIntensities: number[] = []
   pos = new THREE.Vector3(0, 0, -8)
   hp: number = BOSS.hp
   dead = false
@@ -46,25 +51,46 @@ export class Boss {
     private scene: THREE.Scene,
     private effects: Effects,
   ) {
-    this.core = new THREE.Mesh(
-      new THREE.OctahedronGeometry(BOSS.radius),
-      new THREE.MeshStandardMaterial({
-        color: 0x1a0b0b,
-        emissive: 0xff5f2e,
-        emissiveIntensity: 1.8,
-        roughness: 0.3,
-        metalness: 0.5,
-      }),
-    )
-    this.core.castShadow = true
-    this.ring = new THREE.Mesh(
-      new THREE.TorusGeometry(BOSS.radius * 1.5, 0.09, 8, 48),
-      new THREE.MeshBasicMaterial({ color: 0xffb86b, transparent: true, opacity: 0.8 }),
-    )
     this.root = new THREE.Group()
-    this.root.add(this.core, this.ring)
+    const model = instantiate('boss')
+    if (model) {
+      this.root.add(model)
+      this.core = model.getObjectByName('core') ?? model
+      this.ring = model.getObjectByName('ring1') ?? model
+      this.ring2 = model.getObjectByName('ring2') ?? null
+      this.shards = model.getObjectByName('shards') ?? null
+      this.mats = collectMats(model)
+    } else {
+      // 모델 로드 실패 폴백 — 기본 도형
+      const core = new THREE.Mesh(
+        new THREE.OctahedronGeometry(BOSS.radius),
+        new THREE.MeshStandardMaterial({
+          color: 0x1a0b0b,
+          emissive: 0xff5f2e,
+          emissiveIntensity: 1.8,
+          roughness: 0.3,
+          metalness: 0.5,
+        }),
+      )
+      core.castShadow = true
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(BOSS.radius * 1.5, 0.09, 8, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffb86b, transparent: true, opacity: 0.8 }),
+      )
+      this.core = core
+      this.ring = ring
+      this.mats = [core.material as THREE.MeshStandardMaterial]
+      this.root.add(core, ring)
+    }
+    this.baseIntensities = this.mats.map((m) => m.emissiveIntensity)
     this.root.position.copy(this.pos).setY(BOSS.hoverY)
     scene.add(this.root)
+  }
+
+  private setGlow(delta: number): void {
+    this.mats.forEach((m, i) => {
+      m.emissiveIntensity = this.baseIntensities[i] + delta
+    })
   }
 
   get hpPct(): number {
@@ -155,7 +181,7 @@ export class Boss {
   private updateCharge(dt: number, player: Player): void {
     this.chargeTimer -= dt
     if (this.chargeState === 'windup') {
-      ;(this.core.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.8 + (BOSS.charge.windup - this.chargeTimer) * 4
+      this.setGlow((BOSS.charge.windup - this.chargeTimer) * 4)
       if (this.chargeTimer <= 0) {
         this.chargeState = 'dash'
         this.chargeTimer = BOSS.charge.duration
@@ -178,7 +204,7 @@ export class Boss {
     }
     if (this.chargeTimer <= 0) {
       this.chargeState = 'none'
-      ;(this.core.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.8
+      this.setGlow(0)
     }
   }
 
@@ -205,19 +231,17 @@ export class Boss {
     this.root.position.copy(this.pos).setY(BOSS.hoverY + Math.sin(this.time * 1.6) * 0.3)
     this.core.rotation.y += dt * (this.chargeState === 'windup' ? 8 : 1.2)
     this.core.rotation.x = Math.sin(this.time * 0.8) * 0.4
-    this.ring.rotation.x = Math.PI / 2 + Math.sin(this.time) * 0.3
-    this.ring.rotation.y += dt * 2
-    const mat = this.core.material as THREE.MeshStandardMaterial
-    if (invuln) mat.emissiveIntensity = 3 + Math.sin(this.time * 15) * 1.5
+    this.ring.rotation.y += dt * 1.4
+    if (this.ring2) this.ring2.rotation.y -= dt * 0.9
+    if (this.shards) this.shards.rotation.y += dt * 2.2
+    if (invuln) this.setGlow(1.2 + Math.sin(this.time * 15) * 1.5)
   }
 
   /** 피해 적용. 페이즈 전환 무적 중엔 false */
   takeDamage(amount: number): boolean {
     if (this.dead || this.invulnTimer > 0) return false
     this.hp -= amount
-    const mat = this.core.material as THREE.MeshStandardMaterial
-    mat.emissive.setHex(0xffffff)
-    setTimeout(() => mat.emissive.setHex(0xff5f2e), 60)
+    flashMats(this.mats)
 
     // 페이즈 전환: HP를 페이즈 수로 균등 분할한 임계마다
     const phaseCount = this.design.phases.length

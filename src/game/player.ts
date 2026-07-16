@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, PLAYER } from './config'
 import { IS_TOUCH, type Input } from './input'
+import { instantiate, collectMats, flashMats } from './models'
 
 const _move = new THREE.Vector3()
 const _aim = new THREE.Vector3()
@@ -26,6 +27,8 @@ export class Player {
   /** 텔레메트리 훅 */
   onDash?: (dir: THREE.Vector3, facing: THREE.Vector3) => void
 
+  private mats: THREE.MeshStandardMaterial[] = []
+
   constructor(scene: THREE.Scene) {
     this.bodyMat = new THREE.MeshStandardMaterial({
       color: 0x4ade80,
@@ -33,17 +36,26 @@ export class Player {
       emissive: 0x22c55e,
       emissiveIntensity: 0.5,
     })
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER.radius, 0.7, 4, 12), this.bodyMat)
-    body.position.y = 0.9
-    body.castShadow = true
-    const nose = new THREE.Mesh(
-      new THREE.ConeGeometry(0.22, 0.55, 8),
-      new THREE.MeshStandardMaterial({ color: 0xe8e8ec }),
-    )
-    nose.rotation.x = Math.PI / 2
-    nose.position.set(0, 0.9, -0.65)
     this.mesh = new THREE.Group()
-    this.mesh.add(body, nose)
+    const model = instantiate('player')
+    if (model) {
+      model.position.y = 0.9
+      this.mesh.add(model)
+      this.mats = collectMats(model)
+    } else {
+      // 모델 로드 실패 폴백 — 기본 도형
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER.radius, 0.7, 4, 12), this.bodyMat)
+      body.position.y = 0.9
+      body.castShadow = true
+      const nose = new THREE.Mesh(
+        new THREE.ConeGeometry(0.22, 0.55, 8),
+        new THREE.MeshStandardMaterial({ color: 0xe8e8ec }),
+      )
+      nose.rotation.x = Math.PI / 2
+      nose.position.set(0, 0.9, -0.65)
+      this.mesh.add(body, nose)
+      this.mats = [this.bodyMat]
+    }
     scene.add(this.mesh)
   }
 
@@ -114,17 +126,16 @@ export class Player {
     // 표시 갱신
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.y = Math.atan2(-this.facing.x, -this.facing.z) + Math.PI
-    if (this.hurtFlash > 0) {
-      this.hurtFlash -= dt
-      this.bodyMat.color.setHex(this.hurtFlash > 0 ? 0xff6b6b : 0x4ade80)
-    }
+    if (this.hurtFlash > 0) this.hurtFlash -= dt
   }
 
   takeDamage(amount: number): void {
     if (this.isDashing) return // 대시 중 무적
     this.hp = Math.max(0, this.hp - amount)
-    this.hurtFlash = 0.15
-    this.bodyMat.color.setHex(0xff6b6b)
+    if (this.hurtFlash <= 0) {
+      this.hurtFlash = 0.15
+      flashMats(this.mats)
+    }
   }
 
   consumeAttacks(): { melee: boolean; ranged: boolean } {

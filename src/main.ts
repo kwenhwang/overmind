@@ -1,4 +1,8 @@
 import { Game } from './game/game'
+import { loadModels } from './game/models'
+
+// 모델 선로드 (총 ~170KB) — 실패해도 기본 도형으로 진행
+await loadModels()
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const game = new Game(canvas)

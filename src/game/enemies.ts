@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, ENEMY_TYPES, type EnemyType } from './config'
 import { events } from './events'
+import { instantiate, collectMats, flashMats } from './models'
 import type { Player } from './player'
 import type { ProjectilePool } from './projectiles'
 import type { Directive, Modifier } from '../ai/schema'
@@ -26,7 +27,11 @@ export interface EnemyVariant {
 export class Enemy {
   /** 위치·제거의 기준 노드 (본체 회전과 분리) */
   root: THREE.Group
-  private body: THREE.Mesh
+  private body: THREE.Object3D
+  private mats: THREE.MeshStandardMaterial[] = []
+  private baseIntensities: number[] = []
+  /** 드론 모델의 회전 블레이드 노드 */
+  private blades: THREE.Object3D | null = null
   private shieldBadge: THREE.Object3D | null = null
   private orbitBadges: THREE.Object3D[] = []
   pos: THREE.Vector3
@@ -61,21 +66,32 @@ export class Enemy {
     this.hp = Math.round(spec.hp * (variant.hpMul ?? 1))
     this.pos = spawnPos.clone()
 
-    const geo =
-      type === 'brute'
-        ? new THREE.BoxGeometry(spec.radius * 1.8, 1.8, spec.radius * 1.8)
-        : new THREE.OctahedronGeometry(spec.radius * 1.15)
-    this.body = new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({
-        color: spec.color,
-        roughness: 0.35,
-        metalness: 0.3,
-        emissive: spec.color,
-        emissiveIntensity: this.baseEmissive,
-      }),
-    )
-    this.body.castShadow = true
+    const model = instantiate(type)
+    if (model) {
+      this.body = model
+      this.blades = model.getObjectByName('blades') ?? null
+      this.mats = collectMats(model)
+    } else {
+      // 모델 로드 실패 폴백 — 기본 도형
+      const geo =
+        type === 'brute'
+          ? new THREE.BoxGeometry(spec.radius * 1.8, 1.8, spec.radius * 1.8)
+          : new THREE.OctahedronGeometry(spec.radius * 1.15)
+      const mesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({
+          color: spec.color,
+          roughness: 0.35,
+          metalness: 0.3,
+          emissive: spec.color,
+          emissiveIntensity: this.baseEmissive,
+        }),
+      )
+      mesh.castShadow = true
+      this.body = mesh
+      this.mats = [mesh.material as THREE.MeshStandardMaterial]
+    }
+    this.baseIntensities = this.mats.map((m) => m.emissiveIntensity)
     this.body.position.y = 0.9
 
     this.root = new THREE.Group()
@@ -238,13 +254,19 @@ export class Enemy {
     if (this.type === 'drone') events.emit('lungeWarn', { pos: this.pos })
   }
 
+  /** 예고 발광 — 모든 머티리얼의 기준 강도에 델타를 더함 */
+  private setGlow(delta: number): void {
+    this.mats.forEach((m, i) => {
+      m.emissiveIntensity = this.baseIntensities[i] + delta
+    })
+  }
+
   private updateWindup(dt: number, player: Player, projectiles: ProjectilePool, dist: number): void {
     this.phaseTimer -= dt
-    const mat = this.body.material as THREE.MeshStandardMaterial
-    mat.emissiveIntensity = this.baseEmissive + (1 - Math.max(0, this.phaseTimer) / 0.45) * 2.2
+    this.setGlow((1 - Math.max(0, this.phaseTimer) / 0.45) * 2.2)
     if (this.phaseTimer > 0) return
 
-    mat.emissiveIntensity = this.baseEmissive
+    this.setGlow(0)
     if (this.type === 'drone') {
       this.phase = 'lunge'
       this.phaseTimer = ENEMY_TYPES.drone.lungeDuration
@@ -282,7 +304,14 @@ export class Enemy {
     const r = this.pos.length()
     if (r > ARENA_RADIUS - this.radius) this.pos.multiplyScalar((ARENA_RADIUS - this.radius) / r)
     this.root.position.copy(this.pos)
-    this.body.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)
+    if (this.type === 'drone') {
+      // 드론은 공격적 파편 — 본체 회전 + 블레이드 고속 회전
+      this.body.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)
+      if (this.blades) this.blades.rotation.y += dt * 9
+    } else {
+      // 포탑·골렘은 플레이어를 바라봄
+      this.body.rotation.y = Math.atan2(-this.facingDir.x, -this.facingDir.z) + Math.PI
+    }
 
     if (this.shieldBadge) {
       this.root.rotation.y = 0
@@ -338,13 +367,7 @@ export class Enemy {
     this.hp -= amount
     if (knockDir && knockForce > 0) this.knockback.addScaledVector(knockDir, knockForce)
     if (this.hp <= 0) this.dead = true
-    else {
-      const mat = this.body.material as THREE.MeshStandardMaterial
-      mat.emissive.setHex(0xffffff)
-      setTimeout(() => {
-        if (!this.dead) mat.emissive.setHex(ENEMY_TYPES[this.type].color)
-      }, 60)
-    }
+    else flashMats(this.mats)
     return true
   }
 
