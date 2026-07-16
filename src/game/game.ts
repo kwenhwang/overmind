@@ -48,6 +48,9 @@ export class Game {
   private bossDesign: BossDesign | null = null
   private bossIntroElapsed = 0
   private verdictTimer = -1
+  /** 보스 파괴 시퀀스 (연쇄 폭발 후 승리 화면) */
+  private bossDeathTimer = -1
+  private bossDeathPos = new THREE.Vector3()
   private score = 0
   private combo = 0
   private comboTimer = 0
@@ -68,6 +71,8 @@ export class Game {
       hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
       boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
     })
+    // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
+    ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
     // ?autostart — 헤드리스 검증·영상 촬영용 즉시 시작
     if (new URLSearchParams(location.search).has('autostart')) {
       this.startRun()
@@ -93,7 +98,9 @@ export class Game {
     this.boss?.dispose()
     this.boss = null
     this.bossDesign = null
+    this.bossDeathTimer = -1
     this.hud.hideBossBar()
+    this.world.setCoreVisible(true)
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
@@ -209,6 +216,7 @@ export class Game {
   private spawnBoss(): void {
     const design = this.bossDesign!
     this.world.setMood(design.mood)
+    this.world.setCoreVisible(false) // 중앙 코어가 '내려온다'
     this.boss = new Boss(design, this.world.scene, this.effects)
     this.boss.onPhase = (i) => this.enterBossPhase(design.phases[i])
     this.hud.showBossBar(design.phases[0].name)
@@ -245,20 +253,43 @@ export class Game {
     }
   }
 
+  /** 보스 파괴 — 즉시 화면 전환하지 않고 연쇄 폭발 시퀀스(1.8초) 후 승리 */
   private onBossDefeated(): void {
-    if (!this.boss) return
-    const pos = this.boss.pos.clone()
-    this.effects.burst(pos, 0xff5f2e, 40, 14)
-    this.effects.burst(pos, 0xffffff, 20, 9)
-    this.effects.shake(1.0)
-    this.effects.hitstop(0.25)
+    if (!this.boss || this.bossDeathTimer >= 0) return
+    this.bossDeathTimer = 1.8
+    this.bossDeathPos.copy(this.boss.pos)
+    this.effects.hitstop(0.35)
+    this.effects.shake(0.8)
     sfx.enemyDie()
-    this.boss.dispose()
-    this.boss = null
-    this.hud.hideBossBar()
-    this.score += SCORE.boss
-    this.hud.setScore(this.score, this.combo)
-    this.endRun(true)
+    // 남은 미니언 동반 폭발 — 승리의 화룡점정
+    for (const e of this.enemies) {
+      e.dead = true
+      this.effects.burst(e.pos, e.color, 10, 8)
+      this.world.scene.remove(e.root)
+    }
+    this.enemies = []
+  }
+
+  private updateBossDeath(dt: number): void {
+    this.bossDeathTimer -= dt
+    // 연쇄 폭발 (프레임 확률 기반 — 저사양에서도 밀도 유지)
+    if (Math.random() < dt * 14) {
+      const off = new THREE.Vector3((Math.random() - 0.5) * 3.4, 0, (Math.random() - 0.5) * 3.4)
+      this.effects.burst(this.bossDeathPos.clone().add(off), Math.random() < 0.5 ? 0xff5f2e : 0xffffff, 8, 9)
+      this.effects.shake(0.35)
+      sfx.enemyHit()
+    }
+    if (this.bossDeathTimer <= 0 && this.boss) {
+      this.effects.burst(this.bossDeathPos, 0xffffff, 34, 15)
+      this.effects.shake(1.2)
+      sfx.enemyDie()
+      this.boss.dispose()
+      this.boss = null
+      this.hud.hideBossBar()
+      this.score += SCORE.boss
+      this.hud.setScore(this.score, this.combo)
+      this.endRun(true)
+    }
   }
 
   update(dt: number): void {
@@ -310,7 +341,10 @@ export class Game {
         this.boss.update(combatDt, this.player, this.projectiles)
         this.hud.setBossHp(this.boss.hpPct)
         if (this.boss.dead) this.onBossDefeated()
+        if (this.bossDeathTimer >= 0) this.updateBossDeath(dt)
       }
+      // 대시 잔상
+      if (this.player.isDashing) this.effects.dashGhost(this.player.pos)
     }
 
     this.projectiles.update(combatDt)
@@ -410,6 +444,7 @@ export class Game {
     if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
       this.score += SCORE.waveClear
       this.hud.setScore(this.score, this.combo)
+      this.effects.hitstop(0.28) // 클리어 슬로모
       if (this.wave >= TOTAL_WAVES) this.startBossIntro()
       else this.startIntermission()
     }

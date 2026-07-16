@@ -157,6 +157,12 @@ export class World {
     ringMat.emissiveIntensity = 3.4 + Math.sin(this.time * 2.1) * 0.7
   }
 
+  /** 보스전에서 중앙 장식 코어를 숨김 — 그 코어가 '내려와서' 보스가 된다는 연출 일관성 */
+  setCoreVisible(visible: boolean): void {
+    const core = this.scene.getObjectByName('overmind-core')
+    if (core) core.visible = visible
+  }
+
   /** 오버마인드의 감정 상태 → 중앙 코어 색 (confident 주황 / angry 적 / playful 시안 / desperate 보라) */
   setMood(mood: 'confident' | 'angry' | 'playful' | 'desperate'): void {
     const core = this.scene.getObjectByName('overmind-core') as THREE.Mesh | undefined

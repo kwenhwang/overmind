@@ -43,6 +43,9 @@ export class Boss {
   private slams: Slam[] = []
   private time = 0
   private contactCooldown = 0
+  /** 강림 연출 — 상공에서 내려오는 동안 무적·공격 없음 */
+  private entranceTimer = 1.6
+  private landed = false
   /** 페이즈 진입 콜백 (Game이 미니언·해저드·대사 처리) */
   onPhase?: (phaseIndex: number) => void
 
@@ -83,7 +86,10 @@ export class Boss {
       this.root.add(core, ring)
     }
     this.baseIntensities = this.mats.map((m) => m.emissiveIntensity)
-    this.root.position.copy(this.pos).setY(BOSS.hoverY)
+    // ?bosshp=N — 검증·영상 촬영용 체력 오버라이드
+    const dbgHp = Number(new URLSearchParams(location.search).get('bosshp'))
+    if (dbgHp > 0) this.hp = dbgHp
+    this.root.position.copy(this.pos).setY(BOSS.hoverY + 16) // 상공에서 강림 시작
     scene.add(this.root)
   }
 
@@ -104,6 +110,24 @@ export class Boss {
   update(dt: number, player: Player, projectiles: ProjectilePool): void {
     if (this.dead) return
     this.time += dt
+
+    // 강림: 고속 회전하며 하강 → 착지 충격
+    if (this.entranceTimer > 0) {
+      this.entranceTimer -= dt
+      const t = Math.max(0, this.entranceTimer / 1.6)
+      const ease = t * t // 가속 하강
+      this.root.position.copy(this.pos).setY(BOSS.hoverY + ease * 16)
+      this.core.rotation.y += dt * 10
+      if (this.entranceTimer <= 0 && !this.landed) {
+        this.landed = true
+        this.effects.burst(this.pos, 0xff5f2e, 26, 12)
+        this.effects.shake(1.0)
+        this.effects.hitstop(0.12)
+        sfx.enemyDie()
+      }
+      return
+    }
+
     this.attackCooldown = Math.max(0, this.attackCooldown - dt)
 
     _toPlayer.copy(player.pos).sub(this.pos)
@@ -237,9 +261,9 @@ export class Boss {
     if (invuln) this.setGlow(1.2 + Math.sin(this.time * 15) * 1.5)
   }
 
-  /** 피해 적용. 페이즈 전환 무적 중엔 false */
+  /** 피해 적용. 강림·페이즈 전환 무적 중엔 false */
   takeDamage(amount: number): boolean {
-    if (this.dead || this.invulnTimer > 0) return false
+    if (this.dead || this.invulnTimer > 0 || this.entranceTimer > 0) return false
     this.hp -= amount
     flashMats(this.mats)
 

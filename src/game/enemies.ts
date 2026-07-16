@@ -51,6 +51,8 @@ export class Enemy {
   private facingDir = new THREE.Vector3(1, 0, 0)
   private time = Math.random() * 10
   private scaleMul: number
+  /** 스폰 팝 연출 (오버슛 스케일-인) */
+  private spawnTimer = 0.32
   /** L2 디렉티브가 조정하는 공격성 (1~5) */
   aggression = 3
 
@@ -304,6 +306,15 @@ export class Enemy {
     const r = this.pos.length()
     if (r > ARENA_RADIUS - this.radius) this.pos.multiplyScalar((ARENA_RADIUS - this.radius) / r)
     this.root.position.copy(this.pos)
+
+    // 스폰 팝: 오버슛 스케일-인
+    if (this.spawnTimer > 0) {
+      this.spawnTimer -= dt
+      const t = Math.min(1, 1 - this.spawnTimer / 0.32)
+      const c1 = 1.70158
+      const back = 1 + (c1 + 1) * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
+      this.root.scale.setScalar(this.scaleMul * Math.max(0.01, back))
+    }
     if (this.type === 'drone') {
       // 드론은 공격적 파편 — 본체 회전 + 블레이드 고속 회전
       this.body.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)

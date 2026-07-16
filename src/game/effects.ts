@@ -5,6 +5,8 @@ interface Particle {
   vel: THREE.Vector3
   life: number
   maxLife: number
+  /** 고스트류 — 중력·이동 없이 제자리에서 페이드 */
+  still?: boolean
 }
 
 interface ArcFx {
@@ -55,6 +57,22 @@ export class Effects {
         maxLife: 0.8,
       })
     }
+  }
+
+  private lastGhostAt = 0
+
+  /** 대시 잔상 — 짧게 사라지는 발광 고스트 (매 프레임 호출해도 내부 스로틀) */
+  dashGhost(pos: THREE.Vector3, color = 0x4ade80): void {
+    const now = performance.now()
+    if (now - this.lastGhostAt < 35) return
+    this.lastGhostAt = now
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 8, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45 }),
+    )
+    mesh.position.copy(pos).setY(0.9)
+    this.scene.add(mesh)
+    this.particles.push({ mesh, vel: new THREE.Vector3(), life: 0.22, maxLife: 0.44, still: true })
   }
 
   /** 근접 휘두름 — 전방 부채꼴 잔상 */
@@ -124,11 +142,13 @@ export class Effects {
         this.particles.splice(i, 1)
         continue
       }
-      p.vel.y -= 18 * dt
-      p.mesh.position.addScaledVector(p.vel, dt)
-      if (p.mesh.position.y < 0.1) {
-        p.mesh.position.y = 0.1
-        p.vel.y = Math.abs(p.vel.y) * 0.4
+      if (!p.still) {
+        p.vel.y -= 18 * dt
+        p.mesh.position.addScaledVector(p.vel, dt)
+        if (p.mesh.position.y < 0.1) {
+          p.mesh.position.y = 0.1
+          p.vel.y = Math.abs(p.vel.y) * 0.4
+        }
       }
       ;(p.mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(1, p.life / (p.maxLife * 0.5))
     }
