@@ -57,7 +57,8 @@ export class Game {
   private score = 0
   private combo = 0
   private comboTimer = 0
-  private fpsProbe = { frames: 0, start: 0, done: false }
+  // 녹화 모드는 실시간 fps가 무의미 — 프로브 생략(블룸 유지)
+  private fpsProbe = { frames: 0, start: 0, done: new URLSearchParams(location.search).has('record') }
 
   constructor(canvas: HTMLCanvasElement) {
     this.world = new World(canvas)

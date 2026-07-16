@@ -32,6 +32,14 @@ const ctx = profileDir
       return b.newContext({ viewport: { width: 1280, height: 720 } })
     })()
 const page = ctx.pages()[0] ?? (await ctx.newPage())
+
+// PRESET_LS='{"key":"val"}' — 게임 로드 전에 localStorage 주입 (기억 시나리오 연출용)
+if (process.env.PRESET_LS) {
+  const preset = JSON.parse(process.env.PRESET_LS)
+  await page.addInitScript((kv) => {
+    for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, v)
+  }, preset)
+}
 page.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 300)))
 await page.goto(url)
 await page.waitForFunction(() => typeof window.__step === 'function', undefined, { timeout: 30000 })
