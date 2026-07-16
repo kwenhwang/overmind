@@ -8,5 +8,4 @@ compatibility_date = "2026-07-01"
 [vars]
 MODEL = "gpt-5.4-mini"
 MAX_DAILY_CALLS = "2000"
-# 배포 후 GitHub Pages 도메인으로 교체: "https://<user>.github.io"
-# ALLOWED_ORIGINS = ""
+ALLOWED_ORIGINS = "https://kwenhwang.github.io,http://localhost:5199,http://localhost:4173"
