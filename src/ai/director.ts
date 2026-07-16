@@ -1,4 +1,4 @@
-import type { RunContext, TelemetryDigest, WaveDesign } from './schema'
+import type { BossDesign, RunContext, TelemetryDigest, WaveDesign } from './schema'
 
 /**
  * L2 디렉터 클라이언트.
@@ -64,6 +64,55 @@ export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDe
     }
   }
   return fallbackDesign(digest)
+}
+
+/** 보스전 설계 요청 — 누적 프로파일의 총결산. 실패 시 규칙기반 폴백 보스 */
+export async function requestBossDesign(digest: TelemetryDigest): Promise<BossDesign> {
+  const body = JSON.stringify({ ...digest, ...memory.runContext(), boss: true })
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/directive`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) continue
+      const data = (await res.json()) as BossDesign & { fallback?: boolean }
+      if (data.fallback) break
+      if (!data.phases?.length) break
+      return data
+    } catch {
+      // 다음 엔드포인트로 페일오버
+    }
+  }
+  return fallbackBossDesign(digest)
+}
+
+export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
+  const melee = digest.meleeUsePct >= 50
+  return {
+    verdict: '데이터 수집 완료. 너의 패턴은 이미 기록되었다. 최종 검증을 시작한다.',
+    phases: [
+      {
+        name: '검증 프로토콜',
+        attack: melee ? 'radial_burst' : 'charge',
+        minions: [{ type: 'drone', count: 2 }],
+        hazards: [],
+        taunt: '이제 내가 직접 상대한다.',
+      },
+      {
+        name: '말소 프로토콜',
+        attack: 'targeted_slam',
+        minions: [{ type: 'spitter', count: 2 }],
+        hazards: [{ type: 'spike_zone', placement: 'center' }],
+        taunt: '흥미로운 저항이다. 하지만 결과는 같다.',
+      },
+    ],
+    winLine: '예측대로였다. 다음 판도 기록하겠다.',
+    loseLine: '…계산 밖의 변수였다. 인정한다.',
+    mood: 'confident',
+  }
 }
 
 /** LLM 출력 최종 방어선 — 스키마는 서버가 보장하지만 수치 범위는 클라이언트도 확인 */

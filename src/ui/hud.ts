@@ -29,6 +29,24 @@ export class Hud {
     this.waveLabel.textContent = `WAVE ${current} / ${total}`
   }
 
+  showBossBar(name: string): void {
+    ;(document.getElementById('boss-name') as HTMLElement).textContent = name
+    document.getElementById('boss-wrap')?.classList.remove('hidden')
+    this.waveLabel.textContent = 'FINAL'
+  }
+
+  setBossPhaseName(name: string): void {
+    ;(document.getElementById('boss-name') as HTMLElement).textContent = name
+  }
+
+  setBossHp(pct: number): void {
+    ;(document.getElementById('boss-bar') as HTMLElement).style.width = `${Math.max(0, pct)}%`
+  }
+
+  hideBossBar(): void {
+    document.getElementById('boss-wrap')?.classList.add('hidden')
+  }
+
   setScore(score: number, combo: number): void {
     const scoreEl = document.getElementById('score')
     if (!scoreEl) return

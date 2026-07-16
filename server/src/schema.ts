@@ -30,6 +30,8 @@ export const digestSchema = z.object({
    * 유일한 자유 문자열 입력 — 길이 제한 + 프롬프트에서 데이터로만 취급하도록 가드.
    */
   profile: z.string().max(600).default(''),
+  /** true면 웨이브가 아니라 보스전 설계를 요청 (웨이브 5 클리어 후) */
+  boss: z.boolean().default(false),
 })
 
 export type Digest = z.infer<typeof digestSchema>
@@ -72,6 +74,109 @@ export const waveDesignSchema = z.object({
 })
 
 export type WaveDesign = z.infer<typeof waveDesignSchema>
+
+/** 보스전 설계 검증 — 게임 클라이언트 BossDesign과 1:1 */
+export const bossDesignSchema = z.object({
+  verdict: z.string().max(400),
+  phases: z
+    .array(
+      z.object({
+        name: z.string().max(40),
+        attack: z.enum(['radial_burst', 'targeted_slam', 'charge']),
+        minions: z
+          .array(
+            z.object({
+              type: z.enum(['drone', 'spitter', 'brute']),
+              count: z.number().int().min(1).max(4),
+              modifiers: z.array(z.enum(MODIFIERS)).max(2),
+            }),
+          )
+          .max(2),
+        hazards: z
+          .array(
+            z.object({
+              type: z.enum(['spike_zone', 'slow_field']),
+              placement: z.enum(['player_left', 'player_right', 'front', 'behind', 'center']),
+            }),
+          )
+          .max(2),
+        taunt: z.string().max(300),
+      }),
+    )
+    .min(2)
+    .max(3),
+  winLine: z.string().max(300),
+  loseLine: z.string().max(300),
+  mood: z.enum(['confident', 'angry', 'playful', 'desperate']),
+})
+
+export const bossTool = {
+  name: 'issue_boss_design',
+  description: '누적 관찰 기록을 총결산해 최종 보스전을 설계한다.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      verdict: {
+        type: 'string',
+        description:
+          '판결문 — 전투 시작 전 낭독. 누적 기록 속 습관을 근거로 이 플레이어가 어떤 존재인지 총평 (한국어 2~3문장, 차갑고 분석적)',
+      },
+      phases: {
+        type: 'array',
+        minItems: 2,
+        maxItems: 3,
+        description: '페이즈 순서대로. 페이즈마다 공격 패턴·지원·대사가 플레이어 습관을 노려야 함',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '페이즈 이름 (한국어, 짧게)' },
+            attack: {
+              type: 'string',
+              enum: ['radial_burst', 'targeted_slam', 'charge'],
+              description:
+                'radial_burst=전방향 탄막(근접 접근 처벌) / targeted_slam=플레이어 위치 강타(정지·카이팅 처벌) / charge=돌진(원거리 유지 처벌)',
+            },
+            minions: {
+              type: 'array',
+              maxItems: 2,
+              description: '페이즈 진입 시 지원 스폰 (그룹당 1~4기)',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['drone', 'spitter', 'brute'] },
+                  count: { type: 'integer', minimum: 1, maximum: 4 },
+                  modifiers: { type: 'array', items: { type: 'string', enum: [...MODIFIERS] }, maxItems: 2 },
+                },
+                required: ['type', 'count', 'modifiers'],
+              },
+            },
+            hazards: {
+              type: 'array',
+              maxItems: 2,
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['spike_zone', 'slow_field'] },
+                  placement: {
+                    type: 'string',
+                    enum: ['player_left', 'player_right', 'front', 'behind', 'center'],
+                  },
+                },
+                required: ['type', 'placement'],
+              },
+            },
+            taunt: { type: 'string', description: '페이즈 진입 대사 (한국어 1문장)' },
+          },
+          required: ['name', 'attack', 'minions', 'hazards', 'taunt'],
+        },
+      },
+      winLine: { type: 'string', description: '플레이어가 죽었을 때 남기는 마지막 말 (한국어 1문장)' },
+      loseLine: { type: 'string', description: '네가 파괴될 때 남기는 말 — 품위 있는 패배 인정 (한국어 1문장)' },
+      mood: { type: 'string', enum: ['confident', 'angry', 'playful', 'desperate'] },
+    },
+    required: ['verdict', 'phases', 'winLine', 'loseLine', 'mood'],
+  },
+} as const
 
 /** Anthropic tool 스키마 — LLM이 이 형태로만 출력하게 강제 */
 export const directiveTool = {

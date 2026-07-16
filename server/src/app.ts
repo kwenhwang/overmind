@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { digestSchema, waveDesignSchema } from './schema'
+import { digestSchema, waveDesignSchema, bossDesignSchema } from './schema'
 import { callLlm, pickProvider } from './llm'
 
 export interface Env {
@@ -76,7 +76,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
 
     try {
       const raw = await callLlm(env, parsed.data)
-      const design = waveDesignSchema.safeParse(raw)
+      const design = (parsed.data.boss ? bossDesignSchema : waveDesignSchema).safeParse(raw)
       if (!design.success) {
         console.error('schema_mismatch', JSON.stringify(raw)?.slice(0, 300))
         return c.json({ fallback: true, reason: 'schema_mismatch' })

@@ -1,7 +1,19 @@
-import { directiveTool } from './schema'
-import { SYSTEM_PROMPT, buildUserMessage } from './prompt'
+import { directiveTool, bossTool } from './schema'
+import { SYSTEM_PROMPT, BOSS_SYSTEM_PROMPT, buildUserMessage, buildBossMessage } from './prompt'
 import type { Digest } from './schema'
 import type { Env } from './app'
+
+/** 요청 종류(웨이브/보스)에 따라 tool·시스템 프롬프트·메시지 선택 */
+function partsFor(d: Digest) {
+  return d.boss
+    ? { tool: bossTool as ToolDef, system: BOSS_SYSTEM_PROMPT, message: buildBossMessage(d) }
+    : { tool: directiveTool as ToolDef, system: SYSTEM_PROMPT, message: buildUserMessage(d) }
+}
+
+interface ToolDef {
+  name: string
+  input_schema: Record<string, unknown>
+}
 
 /**
  * LLM 프로바이더 계층 — OpenAI(기본)와 Anthropic 겸용.
@@ -30,8 +42,8 @@ export async function callLlm(env: Env, digest: Digest): Promise<unknown> {
  * directiveTool.input_schema → OpenAI strict json_schema.
  * strict 모드는 모든 중첩 object에 additionalProperties:false를 요구 — 재귀로 부여.
  */
-function openAiSchema(): Record<string, unknown> {
-  const schema = structuredClone(directiveTool.input_schema) as Record<string, unknown>
+function openAiSchema(tool: ToolDef): Record<string, unknown> {
+  const schema = structuredClone(tool.input_schema) as Record<string, unknown>
   const walk = (node: unknown): void => {
     if (!node || typeof node !== 'object') return
     const obj = node as Record<string, unknown>
@@ -47,17 +59,18 @@ function openAiSchema(): Record<string, unknown> {
 }
 
 async function callOpenAi(env: Env, digest: Digest): Promise<unknown> {
+  const parts = partsFor(digest)
   const body: Record<string, unknown> = {
     model: env.MODEL || OPENAI_DEFAULT_MODEL,
-    // 한국어 대사가 길면 500으로는 JSON이 중간에 잘림(finish_reason=length) — 실측 후 900으로 확정
-    max_completion_tokens: 900,
+    // 한국어 대사가 길면 잘림(finish_reason=length) — 웨이브 900, 페이즈 다수인 보스는 1600
+    max_completion_tokens: digest.boss ? 1600 : 900,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: buildUserMessage(digest) },
+      { role: 'system', content: parts.system },
+      { role: 'user', content: parts.message },
     ],
     response_format: {
       type: 'json_schema',
-      json_schema: { name: 'wave_design', strict: true, schema: openAiSchema() },
+      json_schema: { name: parts.tool.name, strict: true, schema: openAiSchema(parts.tool) },
     },
   }
   // gpt-5 계열 저지연 설정 — 미지원 모델이면 해당 파라미터 없이 1회 재시도
@@ -134,6 +147,7 @@ function openAiFetch(env: Env, body: Record<string, unknown>): Promise<Response>
 }
 
 async function callAnthropic(env: Env, digest: Digest): Promise<unknown> {
+  const parts = partsFor(digest)
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -143,11 +157,11 @@ async function callAnthropic(env: Env, digest: Digest): Promise<unknown> {
     },
     body: JSON.stringify({
       model: env.MODEL || ANTHROPIC_DEFAULT_MODEL,
-      max_tokens: 500,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildUserMessage(digest) }],
-      tools: [directiveTool],
-      tool_choice: { type: 'tool', name: directiveTool.name },
+      max_tokens: digest.boss ? 1600 : 900,
+      system: parts.system,
+      messages: [{ role: 'user', content: parts.message }],
+      tools: [parts.tool],
+      tool_choice: { type: 'tool', name: parts.tool.name },
     }),
     signal: AbortSignal.timeout(8000),
   })

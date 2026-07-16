@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import {
-  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, ENEMY_TYPES, SCORE,
+  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, ENEMY_TYPES, SCORE, BOSS,
 } from './config'
+import { Boss } from './boss'
 import { World } from './world'
 import { Input, IS_TOUCH } from './input'
 import { Player } from './player'
@@ -13,11 +14,11 @@ import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, fallbackDesign, memory } from '../ai/director'
-import type { WaveDesign } from '../ai/schema'
+import { requestWaveDesign, requestBossDesign, fallbackDesign, memory } from '../ai/director'
+import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
-type State = 'title' | 'playing' | 'intermission' | 'gameover' | 'victory'
+type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | 'victory'
 
 const _toEnemy = new THREE.Vector3()
 
@@ -43,6 +44,10 @@ export class Game {
   private pendingDesign: WaveDesign | null = null
   private pendingSpawn: PendingSpawn | null = null
   private hazardZones: Hazard[] = []
+  private boss: Boss | null = null
+  private bossDesign: BossDesign | null = null
+  private bossIntroElapsed = 0
+  private verdictTimer = -1
   private score = 0
   private combo = 0
   private comboTimer = 0
@@ -61,6 +66,7 @@ export class Game {
     ;(window as unknown as Record<string, unknown>).__dbg = () => ({
       state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
       hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
+      boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
     })
     // ?autostart — 헤드리스 검증·영상 촬영용 즉시 시작
     if (new URLSearchParams(location.search).has('autostart')) {
@@ -84,6 +90,10 @@ export class Game {
     this.effects.clear()
     this.clearPendingSpawn()
     this.clearHazards()
+    this.boss?.dispose()
+    this.boss = null
+    this.bossDesign = null
+    this.hud.hideBossBar()
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
@@ -99,6 +109,13 @@ export class Game {
     this.combo = 0
     this.hud.setScore(0, 0)
     memory.startRun()
+    // ?boss — 보스전 직행 (검증·영상 촬영용 디버그)
+    if (new URLSearchParams(location.search).has('boss')) {
+      this.wave = TOTAL_WAVES
+      this.hud.setWave(this.wave, TOTAL_WAVES)
+      this.startBossIntro()
+      return
+    }
     this.startIntermission()
   }
 
@@ -161,6 +178,89 @@ export class Game {
     this.hazardZones = []
   }
 
+  /** 웨이브 5 클리어 → 최종 프로토콜: LLM이 누적 프로파일로 보스전을 설계 */
+  private startBossIntro(): void {
+    this.state = 'bossIntro'
+    this.bossIntroElapsed = 0
+    this.verdictTimer = -1
+    this.clearHazards()
+    this.hud.showIntermission('최종 프로토콜 기동…')
+    const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+    requestBossDesign(digest).then((design) => {
+      this.bossDesign = design
+    })
+  }
+
+  private updateBossIntro(dt: number): void {
+    this.bossIntroElapsed += dt
+    // 설계 도착 + 최소 연출 2초 후: 판결문 낭독
+    if (this.bossDesign && this.verdictTimer < 0 && this.bossIntroElapsed >= 2) {
+      this.hud.hideIntermission()
+      this.hud.showTaunt(this.bossDesign.verdict, 10)
+      sfx.taunt()
+      this.verdictTimer = 6
+    }
+    if (this.verdictTimer > 0) {
+      this.verdictTimer -= dt
+      if (this.verdictTimer <= 0) this.spawnBoss()
+    }
+  }
+
+  private spawnBoss(): void {
+    const design = this.bossDesign!
+    this.world.setMood(design.mood)
+    this.boss = new Boss(design, this.world.scene, this.effects)
+    this.boss.onPhase = (i) => this.enterBossPhase(design.phases[i])
+    this.hud.showBossBar(design.phases[0].name)
+    this.state = 'playing'
+    sfx.waveStart()
+    this.effects.shake(0.5)
+    this.enterBossPhase(design.phases[0])
+  }
+
+  /** 페이즈 진입 — LLM이 설계한 지원 스폰·해저드·대사 실행 */
+  private enterBossPhase(phase: BossPhase): void {
+    this.hud.setBossPhaseName(phase.name)
+    this.hud.showTaunt(phase.taunt)
+    sfx.taunt()
+    this.effects.shake(0.35)
+    this.clearHazards()
+    for (const h of (phase.hazards ?? []).slice(0, 2)) {
+      const pos = resolveHazardPos(h.placement, this.player.pos, this.player.facing)
+      this.hazardZones.push(new Hazard(h, pos, this.world.scene))
+    }
+    if (this.boss) {
+      for (const group of phase.minions.slice(0, 2)) {
+        for (let i = 0; i < Math.min(group.count, 4); i++) {
+          const a = Math.random() * Math.PI * 2
+          const pos = this.boss.pos
+            .clone()
+            .add(new THREE.Vector3(Math.cos(a) * 4, 0, Math.sin(a) * 4))
+          const minion = new Enemy(group.type, pos, this.world.scene, group.modifiers ?? [])
+          minion.aggression = 4
+          this.enemies.push(minion)
+          this.effects.burst(pos, minion.color, 4, 4)
+        }
+      }
+    }
+  }
+
+  private onBossDefeated(): void {
+    if (!this.boss) return
+    const pos = this.boss.pos.clone()
+    this.effects.burst(pos, 0xff5f2e, 40, 14)
+    this.effects.burst(pos, 0xffffff, 20, 9)
+    this.effects.shake(1.0)
+    this.effects.hitstop(0.25)
+    sfx.enemyDie()
+    this.boss.dispose()
+    this.boss = null
+    this.hud.hideBossBar()
+    this.score += SCORE.boss
+    this.hud.setScore(this.score, this.combo)
+    this.endRun(true)
+  }
+
   update(dt: number): void {
     // 첫 3초(실시간) fps 실측 — 24fps 미만이면 블룸 오프 (저사양 심사 기기 대응)
     if (!this.fpsProbe.done) {
@@ -201,9 +301,16 @@ export class Game {
       if ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -4) {
         this.startWave()
       }
+    } else if (this.state === 'bossIntro') {
+      this.updateBossIntro(dt)
     } else {
       this.updateSpawnTelegraph(combatDt)
       this.updateCombat(combatDt)
+      if (this.boss) {
+        this.boss.update(combatDt, this.player, this.projectiles)
+        this.hud.setBossHp(this.boss.hpPct)
+        if (this.boss.dead) this.onBossDefeated()
+      }
     }
 
     this.projectiles.update(combatDt)
@@ -255,11 +362,18 @@ export class Game {
   }
 
   private updateCombat(dt: number): void {
-    // 모바일: 최근접 적 자동 조준·공격 (이동과 회피에 집중하는 조작 체계)
+    // 모바일: 최근접 표적(적 또는 보스) 자동 조준·공격
     if (IS_TOUCH) {
       const nearest = this.findNearestEnemy()
-      if (nearest) {
-        _toEnemy.copy(nearest.pos).sub(this.player.pos)
+      let targetPos = nearest?.pos ?? null
+      if (this.boss && !this.boss.dead) {
+        const bossDist = this.boss.pos.distanceToSquared(this.player.pos)
+        if (!targetPos || bossDist < targetPos.distanceToSquared(this.player.pos)) {
+          targetPos = this.boss.pos
+        }
+      }
+      if (targetPos) {
+        _toEnemy.copy(targetPos).sub(this.player.pos)
         _toEnemy.y = 0
         const dist = _toEnemy.length()
         this.player.autoCombat(_toEnemy.normalize(), dist)
@@ -293,10 +407,10 @@ export class Game {
       }
     }
 
-    if (this.enemies.length === 0 && !this.pendingSpawn) {
+    if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
       this.score += SCORE.waveClear
       this.hud.setScore(this.score, this.combo)
-      if (this.wave >= TOTAL_WAVES) this.endRun(true)
+      if (this.wave >= TOTAL_WAVES) this.startBossIntro()
       else this.startIntermission()
     }
   }
@@ -376,6 +490,24 @@ export class Game {
         }
       }
     }
+    // 보스도 근접 대상
+    if (this.boss && !this.boss.dead) {
+      _toEnemy.copy(this.boss.pos).sub(this.player.pos)
+      _toEnemy.y = 0
+      const dist = _toEnemy.length()
+      if (dist <= PLAYER.melee.range + BOSS.radius) {
+        _toEnemy.normalize()
+        if (_toEnemy.dot(this.player.facing) >= cosHalfArc) {
+          if (this.boss.takeDamage(PLAYER.melee.damage)) {
+            this.effects.burst(this.boss.pos, 0xffb86b, 6, 6)
+            this.effects.damageNumber(this.boss.pos, String(PLAYER.melee.damage))
+            hitAny = true
+          } else {
+            this.effects.damageNumber(this.boss.pos, '무적', 'blocked')
+          }
+        }
+      }
+    }
     if (hitAny) {
       sfx.meleeHit()
       this.effects.hitstop(0.055)
@@ -387,6 +519,21 @@ export class Game {
     for (const p of this.projectiles.list) {
       if (p.dead) continue
       if (p.fromPlayer) {
+        // 보스 명중 판정
+        if (this.boss && !this.boss.dead) {
+          const hitDist = p.radius + BOSS.radius
+          if (p.pos.distanceToSquared(this.boss.pos) < hitDist * hitDist) {
+            if (this.boss.takeDamage(p.damage)) {
+              sfx.enemyHit()
+              this.effects.burst(this.boss.pos, 0xffb86b, 3, 4)
+              this.effects.damageNumber(this.boss.pos, String(p.damage))
+            } else {
+              this.effects.damageNumber(this.boss.pos, '무적', 'blocked')
+            }
+            p.dead = true
+            continue
+          }
+        }
         for (const e of this.enemies) {
           if (e.dead) continue
           const hitDist = p.radius + e.radius
@@ -423,12 +570,17 @@ export class Game {
     else sfx.defeat()
     const best = Math.max(this.score, Number(localStorage.getItem('overmind-best') ?? 0))
     localStorage.setItem('overmind-best', String(best))
+    // 보스전 도달 시엔 LLM이 설계한 승패 대사를 사용
+    const line = victory
+      ? this.bossDesign
+        ? `"${this.bossDesign.loseLine}"`
+        : '너는 예측을 벗어났다.'
+      : this.bossDesign
+        ? `"${this.bossDesign.winLine}"`
+        : '"예측대로였다." — 오버마인드는 너의 패턴을 학습했다.'
     this.hud.showScreen(
       victory ? 'OVERMIND 정지' : 'OVERMIND 승리',
-      (victory
-        ? '너는 예측을 벗어났다.'
-        : '"예측대로였다." — 오버마인드는 너의 패턴을 학습했다.') +
-        `\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}`,
+      `${line}\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}`,
       'RETRY',
       () => this.startRun(),
     )

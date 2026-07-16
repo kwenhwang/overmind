@@ -49,6 +49,32 @@ export interface WaveDesign {
   aggression: 1 | 2 | 3 | 4 | 5
 }
 
+/** 보스 공격 패턴 부품 — 결정론 구현 3종, LLM이 페이즈별로 프로파일에 맞춰 선택 */
+export type BossAttack = 'radial_burst' | 'targeted_slam' | 'charge'
+
+export interface BossPhase {
+  /** 페이즈 이름 (연출용, 한국어) */
+  name: string
+  attack: BossAttack
+  /** 페이즈 진입 시 지원 스폰 (0~2그룹) */
+  minions: { type: EnemyType; count: number; modifiers?: Modifier[] }[]
+  hazards?: HazardSpec[]
+  /** 페이즈 진입 대사 */
+  taunt: string
+}
+
+/** 보스전 설계 — 누적 프로파일의 총결산 */
+export interface BossDesign {
+  /** 판결문: 축적된 관찰 기록의 낭독 (보스전 인트로, 2~3문장) */
+  verdict: string
+  phases: BossPhase[]
+  /** 플레이어가 죽었을 때 보스의 마지막 말 */
+  winLine: string
+  /** 보스가 파괴될 때 남기는 말 */
+  loseLine: string
+  mood: 'confident' | 'angry' | 'playful' | 'desperate'
+}
+
 /** 판(run) 경계를 넘는 컨텍스트 — 디렉터 요청에 다이제스트와 함께 실림 */
 export interface RunContext {
   /** 몇 번째 판인가 (localStorage 누적) */

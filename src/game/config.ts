@@ -38,4 +38,17 @@ export const TOTAL_WAVES = 5
 /** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
 export const SPAWN_TELEGRAPH_SEC = 0.9
 
-export const SCORE = { drone: 100, spitter: 150, brute: 300, waveClear: 500 } as const
+export const SCORE = { drone: 100, spitter: 150, brute: 300, waveClear: 500, boss: 5000 } as const
+
+export const BOSS = {
+  radius: 1.8,
+  hp: 550,
+  hoverY: 2.2,
+  speed: 2.4,
+  contactDamage: 14,
+  /** 페이즈 전환 시 무적 연출 시간 */
+  phaseInvulnSec: 2.0,
+  radialBurst: { count: 12, speed: 10.5, damage: 8, cooldown: 2.4 },
+  targetedSlam: { warnSec: 0.85, radius: 3.4, damage: 20, cooldown: 3.2 },
+  charge: { windup: 0.65, speed: 24, duration: 0.5, damage: 18, cooldown: 4.2 },
+} as const

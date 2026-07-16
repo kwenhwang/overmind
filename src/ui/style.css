@@ -14,8 +14,24 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
   font-size: 15px; letter-spacing: .35em; color: #9ca0b8; text-transform: uppercase;
 }
+#boss-wrap {
+  position: absolute; top: 46px; left: 50%; transform: translateX(-50%);
+  width: min(560px, 80vw); text-align: center;
+}
+#boss-name {
+  font-size: 13px; letter-spacing: .3em; color: #ffb86b; margin-bottom: 5px;
+  text-shadow: 0 0 12px rgba(255, 140, 40, .5);
+}
+#boss-bar-bg {
+  height: 10px; background: #1c1420; border: 1px solid #5a3242; border-radius: 3px; overflow: hidden;
+}
+#boss-bar {
+  height: 100%; width: 100%; transition: width .2s ease-out;
+  background: linear-gradient(90deg, #f97316, #dc2626);
+}
+
 #taunt {
-  position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 74px; left: 50%; transform: translateX(-50%);
   max-width: 640px; padding: 10px 18px; text-align: center;
   font-size: 17px; line-height: 1.5; color: #ffb86b;
   background: rgba(12, 10, 8, .72); border: 1px solid #5a4632; border-radius: 8px;
