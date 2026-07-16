@@ -33,6 +33,12 @@ npm install && npm run dev          # 게임 (http://localhost:5173)
 cd server && npm install && npm run dev  # LLM 프록시 (ANTHROPIC_API_KEY 필요, 없으면 폴백 동작)
 ```
 
+## 문서
+
+- [게임 소개서](docs/game-intro.md) — 목표·조작·시스템·실행 방법
+- [AI 활용 기술 문서](docs/ai-tech-doc.md) — LLM 디렉터 아키텍처·주요 프롬프트·개발 파이프라인
+- 프롬프트 버전 이력: `server/prompts/`
+
 ## 개발 도구
 
-Claude Code (Claude Fable 5)로 개발. 사용 도구·프롬프트·활용 내역은 `docs/ai-tech-doc.md` 참조.
+Claude Code (Claude Fable 5)로 전면 개발 — 코드·3D 모델(Blender bpy)·사운드(WebAudio 신스) 전부. 상세는 AI 활용 기술 문서 참조.
