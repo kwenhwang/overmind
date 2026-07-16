@@ -58,9 +58,11 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   box-shadow: 0 0 24px rgba(34, 211, 238, .12);
 }
 #report .report-title {
-  font-size: 12px; letter-spacing: .3em; color: #22d3ee; margin-bottom: 6px;
+  font-size: 12px; letter-spacing: .3em; color: #22d3ee; margin-bottom: 8px;
   text-transform: uppercase;
 }
+#report .report-pick { font-size: 22px; color: #cbd5e1; line-height: 1.4; }
+#report .report-pick b { color: #fff; }
 #report .report-row b { color: #e8e8ec; }
 #report .report-memory {
   margin-top: 8px; padding-top: 8px; border-top: 1px dashed #1e3a4a;

@@ -56,7 +56,7 @@ export class Hud {
   }
 
   /** 조롱 대사 — 한 글자씩 타이핑 (AI가 말하는 질감). 녹화 모드는 프레임 기반 진행 */
-  showTaunt(text: string, seconds = 7): void {
+  showTaunt(text: string, seconds = 4.5): void {
     clearTimeout(this.tauntTimer)
     clearInterval(this.typeTimer)
     this.taunt.textContent = ''
@@ -95,24 +95,33 @@ export class Hud {
     this.intermission.classList.add('hidden')
   }
 
-  /** 인터미션 관찰 리포트 — 오버마인드가 "본 것"과 "기억"을 그대로 보여줘 AI의 존재를 증명 */
+  /**
+   * 인터미션 관찰 리포트 — 텍스트 과다 피드백 반영: 수치 나열 대신 '가장 두드러진 습관'
+   * 하나만 크게 지목 + 대응 1줄. 3.5초 인터미션에 한눈에 읽히게.
+   */
   showReport(d: TelemetryDigest, profile = ''): void {
-    const memoryRow = profile
-      ? `<div class="report-memory">기억: ${escapeHtml(profile)}</div>`
-      : ''
+    const memoryRow = profile ? `<div class="report-memory">${escapeHtml(profile)}</div>` : ''
     if (d.wave === 0) {
-      this.report.innerHTML = `<div class="report-title">OVERMIND 기동</div>
-        ${memoryRow || '<div class="report-row">관측 데이터 없음 — 수집을 시작한다</div>'}
+      this.report.innerHTML = `<div class="report-title">OVERMIND</div>
+        ${memoryRow || '<div class="report-pick">관측 시작</div>'}
         <div class="report-counter hidden" id="report-counter"></div>`
     } else {
-      this.report.innerHTML = `<div class="report-title">관찰 리포트 — WAVE ${d.wave}</div>
-        <div class="report-row">회피 편향 <b>← ${d.dodgeLeftPct}%</b> / <b>${d.dodgeRightPct}% →</b></div>
-        <div class="report-row">무기 선호 근접 <b>${d.meleeUsePct}%</b> · 원거리 <b>${d.rangedUsePct}%</b></div>
-        <div class="report-row">평균 위치 중심에서 <b>${Math.round(d.avgDistToCenter * 100)}%</b> · 피해 <b>${d.damageTakenThisWave}</b></div>
+      this.report.innerHTML = `<div class="report-title">관찰 — WAVE ${d.wave}</div>
+        <div class="report-pick">${this.topHabit(d)}</div>
         ${memoryRow}
         <div class="report-counter hidden" id="report-counter"></div>`
     }
     this.report.classList.remove('hidden')
+  }
+
+  /** 가장 편차가 큰 습관 하나를 골라 한 줄로 지목 */
+  private topHabit(d: TelemetryDigest): string {
+    const cands = [
+      { dev: Math.abs(d.dodgeLeftPct - 50), text: d.dodgeLeftPct >= 50 ? `회피 <b>왼쪽 ${d.dodgeLeftPct}%</b>` : `회피 <b>오른쪽 ${d.dodgeRightPct}%</b>` },
+      { dev: Math.abs(d.meleeUsePct - 50), text: d.meleeUsePct >= 50 ? `<b>근접 선호 ${d.meleeUsePct}%</b>` : `<b>원거리 선호 ${d.rangedUsePct}%</b>` },
+      { dev: Math.abs(d.avgDistToCenter - 0.5) * 100, text: d.avgDistToCenter >= 0.5 ? `<b>외곽 ${Math.round(d.avgDistToCenter * 100)}%</b> 체류` : `<b>중앙 밀집</b>` },
+    ]
+    return cands.sort((a, b) => b.dev - a.dev)[0].text
   }
 
   /** LLM 설계 도착 시 — 무엇을 노렸는지 공개 (관찰→카운터 인과 시각화) */

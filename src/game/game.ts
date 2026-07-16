@@ -21,6 +21,7 @@ import { Hud } from '../ui/hud'
 type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | 'victory'
 
 const _toEnemy = new THREE.Vector3()
+const _threat = new THREE.Vector3()
 
 /** 녹화 연기용 — 데스크톱에서도 모바일식 자동 조준·공격 */
 const AUTO_AIM = new URLSearchParams(location.search).has('autoaim')
@@ -74,6 +75,7 @@ export class Game {
       state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
       hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
       boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
+      dodge: this.telemetry.debugDodge(),
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
@@ -108,8 +110,8 @@ export class Game {
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
-    this.player.onDash = (dir, facing) => {
-      this.telemetry.recordDash(dir, facing)
+    this.player.onDash = (dir) => {
+      this.telemetry.recordDash(dir, this.nearestThreatDir(_threat))
       sfx.dash()
       // mirror_dash 모디파이어: 오버마인드가 회피 자체에 반응한다
       for (const e of this.enemies) e.mirrorDash(dir)
@@ -326,7 +328,7 @@ export class Game {
 
     this.input.updateAim()
     this.player.update(combatDt, this.input)
-    this.telemetry.tick(combatDt, this.player.pos)
+    this.telemetry.tick(combatDt, this.player.pos, this.player.moveDir, this.nearestThreatDir(_threat))
 
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
@@ -484,6 +486,26 @@ export class Game {
     this.score += gained
     this.effects.damageNumber(e.pos, `+${gained}`, 'score')
     this.hud.setScore(this.score, this.combo)
+  }
+
+  /** 최근접 위협(적 또는 보스) 방향 (정규화). 없으면 0벡터 — 회피 성향 측정 기준 */
+  private nearestThreatDir(out: THREE.Vector3): THREE.Vector3 {
+    out.set(0, 0, 0)
+    let bestDist = Infinity
+    const e = this.findNearestEnemy()
+    if (e) {
+      bestDist = e.pos.distanceToSquared(this.player.pos)
+      out.copy(e.pos)
+    }
+    if (this.boss && !this.boss.dead) {
+      const d = this.boss.pos.distanceToSquared(this.player.pos)
+      if (d < bestDist) {
+        bestDist = d
+        out.copy(this.boss.pos)
+      }
+    }
+    if (bestDist === Infinity) return out.set(0, 0, 0)
+    return out.sub(this.player.pos).setY(0).normalize()
   }
 
   private findNearestEnemy(): Enemy | null {

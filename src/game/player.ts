@@ -13,6 +13,8 @@ export class Player {
   hp: number = PLAYER.hp
   /** 해저드(감속 지대 등)가 조정하는 이동 배율 — Game이 매 프레임 설정 */
   speedMul = 1
+  /** 이번 프레임의 이동 방향 (정규화, 정지 시 0) — 텔레메트리가 상시 회피 성향 측정에 사용 */
+  moveDir = new THREE.Vector3()
   private dashTimer = 0
   private dashCooldown = 0
   private dashDir = new THREE.Vector3()
@@ -25,7 +27,7 @@ export class Player {
   wantsMelee = false
   wantsRanged = false
   /** 텔레메트리 훅 */
-  onDash?: (dir: THREE.Vector3, facing: THREE.Vector3) => void
+  onDash?: (dir: THREE.Vector3) => void
 
   private mats: THREE.MeshStandardMaterial[] = []
 
@@ -85,6 +87,7 @@ export class Player {
     this.rangedCooldown = Math.max(0, this.rangedCooldown - dt)
 
     const move = input.moveDir(_move)
+    this.moveDir.copy(move)
 
     // 대시: 이동 방향으로 짧은 무적 돌진
     if (this.dashTimer > 0) {
@@ -95,7 +98,7 @@ export class Player {
         this.dashTimer = PLAYER.dashDuration
         this.dashCooldown = PLAYER.dashCooldown
         this.dashDir.copy(move)
-        this.onDash?.(this.dashDir, this.facing)
+        this.onDash?.(this.dashDir)
       }
       this.pos.addScaledVector(move, PLAYER.speed * this.speedMul * dt)
     }
