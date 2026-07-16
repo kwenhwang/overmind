@@ -79,7 +79,37 @@ def box(scale, loc, rot=(0, 0, 0), bevel=0.0):
     return o
 
 
+def walk_meshes(root):
+    out = []
+
+    def rec(o):
+        if o.type == "MESH":
+            out.append(o)
+        for c in o.children:
+            rec(c)
+
+    rec(root)
+    return out
+
+
+def bake_ao(root):
+    """AO를 버텍스 컬러(COLOR_0)로 베이크 — three.js가 베이스 컬러에 곱해
+    틈·접합부에 부드러운 음영이 생긴다 (로우폴리 '장난감 플라스틱' 인상 탈출의 핵심)."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 16
+    scene.render.bake.target = "VERTEX_COLORS"
+    for o in walk_meshes(root):
+        ca = o.data.color_attributes.new(name="AO", type="BYTE_COLOR", domain="CORNER")
+        o.data.color_attributes.active_color = ca
+        bpy.ops.object.select_all(action="DESELECT")
+        o.select_set(True)
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.bake(type="AO")
+
+
 def export(root, filename):
+    bake_ao(root)
     bpy.ops.object.select_all(action="DESELECT")
 
     def sel(o):

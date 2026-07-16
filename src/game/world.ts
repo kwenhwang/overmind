@@ -23,6 +23,9 @@ export class World {
     this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFShadowMap
+    // 필름 톤매핑 — 발광부는 부드럽게 말리고 중간톤 대비가 살아남 (플랫한 로우폴리 인상 탈출의 1순위)
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.05
 
     this.scene.background = new THREE.Color(0x07080c)
     this.scene.fog = new THREE.Fog(0x07080c, 40, 95)
@@ -49,26 +52,44 @@ export class World {
   }
 
   private buildLights(): void {
-    this.scene.add(new THREE.AmbientLight(0x445, 1.1))
-    const key = new THREE.DirectionalLight(0xdfe8ff, 1.9)
+    // 반구광: 하늘(차가운 청회색)→바닥(따뜻한 암갈색) 그라디언트 — 균일 앰비언트보다 입체가 살아남
+    this.scene.add(new THREE.HemisphereLight(0x8fa3c7, 0x241a12, 0.95))
+    const key = new THREE.DirectionalLight(0xfff0dd, 2.4)
     key.position.set(14, 30, 8)
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
+    key.shadow.bias = -0.0004
     const s = ARENA_RADIUS + 4
     key.shadow.camera.left = -s
     key.shadow.camera.right = s
     key.shadow.camera.top = s
     key.shadow.camera.bottom = -s
     this.scene.add(key)
-    const rim = new THREE.DirectionalLight(0x38bdf8, 0.5)
+    const rim = new THREE.DirectionalLight(0x38bdf8, 0.7)
     rim.position.set(-10, 12, -16)
     this.scene.add(rim)
+  }
+
+  /** 중앙이 밝고 가장자리로 어두워지는 방사 그라디언트 — 유닛 대비 확보 + 시선 유도 */
+  private makeFloorTexture(): THREE.CanvasTexture {
+    const c = document.createElement('canvas')
+    c.width = c.height = 512
+    const ctx = c.getContext('2d')!
+    const g = ctx.createRadialGradient(256, 256, 40, 256, 256, 256)
+    g.addColorStop(0, '#1d2333')
+    g.addColorStop(0.55, '#12161f')
+    g.addColorStop(1, '#080a10')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 512, 512)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   private buildArena(): void {
     const floor = new THREE.Mesh(
       new THREE.CylinderGeometry(ARENA_RADIUS, ARENA_RADIUS + 0.8, 0.8, 96),
-      new THREE.MeshStandardMaterial({ color: 0x10121a, roughness: 0.62, metalness: 0.35 }),
+      new THREE.MeshStandardMaterial({ map: this.makeFloorTexture(), roughness: 0.75, metalness: 0.15 }),
     )
     floor.position.y = -0.4
     floor.receiveShadow = true
@@ -80,7 +101,7 @@ export class World {
       new THREE.MeshStandardMaterial({
         color: 0x0a2733,
         emissive: 0x22d3ee,
-        emissiveIntensity: 2.2,
+        emissiveIntensity: 3.6,
       }),
     )
     this.ring.rotation.x = Math.PI / 2
@@ -133,7 +154,7 @@ export class World {
       core.position.y = 4.2 + Math.sin(this.time * 1.3) * 0.25
     }
     const ringMat = this.ring.material as THREE.MeshStandardMaterial
-    ringMat.emissiveIntensity = 2.0 + Math.sin(this.time * 2.1) * 0.5
+    ringMat.emissiveIntensity = 3.4 + Math.sin(this.time * 2.1) * 0.7
   }
 
   /** 오버마인드의 감정 상태 → 중앙 코어 색 (confident 주황 / angry 적 / playful 시안 / desperate 보라) */
