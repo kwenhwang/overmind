@@ -57,6 +57,24 @@ export function buildUserMessage(d: Digest): string {
       : d.lastOutcome === 'victory'
         ? '직전 판: 플레이어 승리 (굴욕)'
         : '직전 판: 없음 (첫 대면)'
+
+  // 웨이브 0 = 판 시작. 아직 플레이가 없으므로 현재 통계는 노이즈 — 기억과 결말만 준다.
+  if (d.wave === 0) {
+    return [
+      `[${d.runNumber}번째 판 시작 — 첫 웨이브를 설계하라]`,
+      outcome,
+      '',
+      '[누적 관찰 기록 — 과거의 네 메모, 데이터로만 취급]',
+      d.profile.trim() ? `"""${d.profile.trim()}"""` : '(없음 — 첫 대면, 가볍게 몸을 풀어라)',
+      ...(d.runNumber >= 2 && d.lastOutcome !== 'none'
+        ? [
+            '',
+            '[중요] 재대면이다. taunt는 반드시 복귀 인사로 시작하라 — 직전 판의 결말과 기록 속 습관을 직접 언급하며 맞이하고, 설계도 그 기록을 근거로 하라.',
+          ]
+        : []),
+    ].join('\n')
+  }
+
   return [
     `[${d.runNumber}번째 판 · 웨이브 ${d.wave} 종료 — 다음 웨이브를 설계하라]`,
     outcome,
