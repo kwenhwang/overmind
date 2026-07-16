@@ -6,7 +6,20 @@ export type ModelName = 'player' | 'drone' | 'spitter' | 'brute' | 'boss'
 const registry = new Map<ModelName, THREE.Group>()
 
 /**
- * Blender 파이프라인 산출물(public/models/*.glb) 로드.
+ * 유닛별 목표 시각 크기(수평 최대변) + 정면 회전(Y, 라디안).
+ * CC0 외부 모델(Quaternius)은 크기·원점·정면이 제각각이라 로드 시 정규화한다.
+ * 게임 코드는 원점=시각 중심, 정면 -Z 를 가정하므로 그에 맞춘다.
+ */
+const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
+  player: { size: 2.3, faceY: Math.PI }, // 전투기: 노즈가 -Z 향하게
+  drone: { size: 1.7, faceY: 0 },
+  spitter: { size: 2.0, faceY: 0 },
+  brute: { size: 2.9, faceY: 0 },
+  boss: { size: 5.6, faceY: 0 },
+}
+
+/**
+ * CC0 glTF 모델(public/models/*.glb) 로드 + 정규화.
  * 실패해도 게임은 기본 도형으로 동작해야 하므로 절대 throw하지 않는다.
  */
 export async function loadModels(): Promise<void> {
@@ -18,16 +31,36 @@ export async function loadModels(): Promise<void> {
       try {
         const gltf = await loader.loadAsync(`${base}/${name}.glb`)
         gltf.scene.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) {
-            o.castShadow = true
-          }
+          if ((o as THREE.Mesh).isMesh) o.castShadow = true
         })
-        registry.set(name, gltf.scene)
+        registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
       } catch (err) {
         console.warn(`model load failed: ${name}`, err)
       }
     }),
   )
+}
+
+/** 모델을 목표 크기로 스케일 + 시각 중심을 원점으로 이동 + 정면 회전. 래퍼 그룹 반환. */
+function normalize(scene: THREE.Object3D, cfg: { size: number; faceY: number }): THREE.Group {
+  const box = new THREE.Box3().setFromObject(scene)
+  const size = new THREE.Vector3()
+  box.getSize(size)
+  const maxHoriz = Math.max(size.x, size.z) || 1
+  const s = cfg.size / maxHoriz
+  scene.scale.setScalar(s)
+  // 스케일 적용 후 중심 재계산해 원점으로 이동
+  const box2 = new THREE.Box3().setFromObject(scene)
+  const center = new THREE.Vector3()
+  box2.getCenter(center)
+  scene.position.sub(center)
+  // 정면 회전은 래퍼에 적용 (내부 offset과 분리)
+  const wrapper = new THREE.Group()
+  wrapper.add(scene)
+  wrapper.rotation.y = cfg.faceY
+  const outer = new THREE.Group()
+  outer.add(wrapper)
+  return outer
 }
 
 /** 인스턴스 생성 — 머티리얼까지 복제해 개체별 이미시브 연출이 서로 간섭하지 않게 */
