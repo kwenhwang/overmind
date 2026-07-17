@@ -38,12 +38,9 @@ export async function loadModels(): Promise<void> {
           if (mat?.isMeshStandardMaterial) {
             mat.metalness = Math.min(mat.metalness, 0.15)
             mat.roughness = Math.max(mat.roughness, 0.55)
-            // 적에게만 자체발광 부여: 조명·환경맵 약한 기기에서도 형체가 확실히 보이게.
-            // 플레이어(전투기)는 원래 재질 유지 — emissive 주면 하얗게 워시아웃돼 멋이 죽음.
-            if (name !== 'player' && mat.emissive.getHex() === 0x000000) {
-              mat.emissive.copy(mat.color)
-              mat.emissiveIntensity = 0.85
-            }
+            // (emissive 부여 제거 — ANGLE/D3D11 일부 GPU에서 emissive 세팅된 적 모델이
+            //  통째로 렌더 실패했음(배지·해저드는 보이나 적 본체만 사라짐, 진단으로 확정).
+            //  가시성은 조명+환경맵으로 충분 — 같은 재질의 플레이어가 정상 렌더됨.)
           }
         })
         registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
