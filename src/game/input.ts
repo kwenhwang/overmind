@@ -10,7 +10,6 @@ export class Input {
   private ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
   /** 마우스가 가리키는 지면(XZ) 위치 */
   aimPoint = new THREE.Vector3()
-  meleePressed = false
   rangedHeld = false
 
   // ── 터치 조이스틱 상태 ──
@@ -18,6 +17,7 @@ export class Input {
   private joyOrigin = new THREE.Vector2()
   private joyVector = new THREE.Vector2() // -1..1
   private touchDashRequested = false
+  private mouseDashRequested = false
 
   constructor(private camera: THREE.Camera) {
     addEventListener('keydown', (e) => {
@@ -28,10 +28,10 @@ export class Input {
     addEventListener('mousemove', (e) => {
       this.mouseNdc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
     })
-    // 슈터 관습: 좌클릭 = 원거리 주력(연사), 우클릭 = 근접(고위험 고보상)
+    // 좌클릭 = 사격(연사), 우클릭 = 대시(회피). 근접은 밀착 시 자동 발동.
     addEventListener('mousedown', (e) => {
       if (e.button === 0) this.rangedHeld = true
-      if (e.button === 2) this.meleePressed = true
+      if (e.button === 2) this.mouseDashRequested = true
     })
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.rangedHeld = false
@@ -110,24 +110,21 @@ export class Input {
       out.set(this.joyVector.x, 0, this.joyVector.y)
       return out.normalize()
     }
-    if (this.keys.has('KeyW')) out.z -= 1
-    if (this.keys.has('KeyS')) out.z += 1
-    if (this.keys.has('KeyA')) out.x -= 1
-    if (this.keys.has('KeyD')) out.x += 1
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) out.z -= 1
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) out.z += 1
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) out.x -= 1
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) out.x += 1
     return out.lengthSq() > 0 ? out.normalize() : out
   }
 
   get dashPressed(): boolean {
-    if (this.touchDashRequested) return true
+    if (this.touchDashRequested || this.mouseDashRequested) return true
     return this.keys.has('Space') || this.keys.has('ShiftLeft')
   }
 
-  /** 키보드 대체 공격 (마우스 없는 환경) */
-  get meleeKeyHeld(): boolean {
-    return this.keys.has('KeyJ')
-  }
+  /** 키보드 대체 사격 (마우스 없는 환경). 근접은 자동이라 키 없음 */
   get rangedKeyHeld(): boolean {
-    return this.keys.has('KeyK')
+    return this.keys.has('KeyK') || this.keys.has('KeyJ')
   }
 
   updateAim(): void {
@@ -137,7 +134,7 @@ export class Input {
 
   /** 프레임 끝에서 1회성 입력 소거 */
   endFrame(): void {
-    this.meleePressed = false
     this.touchDashRequested = false
+    this.mouseDashRequested = false
   }
 }

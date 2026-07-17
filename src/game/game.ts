@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import {
-  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, ENEMY_TYPES, SCORE, BOSS,
+  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, SCORE, BOSS,
 } from './config'
 import { Boss } from './boss'
 import { World } from './world'
@@ -143,7 +143,7 @@ export class Game {
         'OVERMIND',
         IS_TOUCH
           ? '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
-          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n[ 마우스로 조준 · 좌클릭 = 사격 ]\nWASD 이동 · Space 대시(무적) · 우클릭 = 근접(강력)',
+          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n이동 WASD·방향키 · 조준 마우스 · 사격 좌클릭\n대시(무적) Space 또는 우클릭 · 근접은 밀착 시 자동',
         'START',
         () => this.startRun(),
       )
@@ -474,32 +474,29 @@ export class Game {
   }
 
   private updateCombat(dt: number): void {
-    // 모바일·쉬운모드·녹화(?autoaim): 최근접 표적(적 또는 보스) 자동 조준·공격
+    // 자동 사격(모바일·쉬운·녹화): 최근접 표적으로 조준 후 발사. 수동 모드는 마우스 조준.
     if (IS_TOUCH || AUTO_AIM || this.easy) {
-      const nearest = this.findNearestEnemy()
-      let targetPos = nearest?.pos ?? null
+      let targetPos = this.findNearestEnemy()?.pos ?? null
       if (this.boss && !this.boss.dead) {
-        const bossDist = this.boss.pos.distanceToSquared(this.player.pos)
-        if (!targetPos || bossDist < targetPos.distanceToSquared(this.player.pos)) {
+        if (!targetPos || this.boss.pos.distanceToSquared(this.player.pos) < targetPos.distanceToSquared(this.player.pos))
           targetPos = this.boss.pos
-        }
       }
       if (targetPos) {
-        _toEnemy.copy(targetPos).sub(this.player.pos)
-        _toEnemy.y = 0
-        const dist = _toEnemy.length()
-        this.player.autoCombat(_toEnemy.normalize(), dist)
+        _toEnemy.copy(targetPos).sub(this.player.pos).setY(0)
+        this.player.autoFire(_toEnemy.normalize())
       }
     }
 
-    const attacks = this.player.consumeAttacks()
-    if (attacks.melee) {
+    // 근접 자동 발동(모든 모드): 밀착한 적/보스가 있으면 전방위 근접
+    if (this.enemyInMeleeRange() && this.player.requestMelee()) {
       this.tickMelee = true
       this.telemetry.recordMelee()
       sfx.meleeSwing()
       this.effects.meleeArc(this.player.pos, this.player.facing, PLAYER.melee.range, PLAYER.melee.arcDeg)
-      this.meleeSweep()
     }
+
+    const attacks = this.player.consumeAttacks()
+    if (attacks.melee) this.meleeSweep()
     if (attacks.ranged) {
       this.tickFire = true
       this.telemetry.recordRanged()
@@ -598,51 +595,48 @@ export class Game {
     return best
   }
 
-  /** 근접 공격: 전방 부채꼴 범위 판정 + 넉백 + 히트스톱 */
+  /** 밀착한 적/보스가 근접 사거리 안에 있는지 — 자동 근접 발동 트리거 */
+  private enemyInMeleeRange(): boolean {
+    for (const e of this.enemies) {
+      if (!e.dead && e.pos.distanceTo(this.player.pos) <= PLAYER.melee.range + e.radius) return true
+    }
+    if (this.boss && !this.boss.dead && this.boss.pos.distanceTo(this.player.pos) <= PLAYER.melee.range + BOSS.radius)
+      return true
+    return false
+  }
+
+  /** 근접 공격: 전방위 범위 판정(자동이라 조준 없음) + 넉백 + 히트스톱 */
   private meleeSweep(): void {
-    const cosHalfArc = Math.cos((PLAYER.melee.arcDeg / 2) * (Math.PI / 180))
     let hitAny = false
     for (const e of this.enemies) {
+      if (e.dead) continue
       _toEnemy.copy(e.pos).sub(this.player.pos)
       _toEnemy.y = 0
       const dist = _toEnemy.length()
-      if (dist > PLAYER.melee.range + ENEMY_TYPES[e.type].radius) continue
+      if (dist > PLAYER.melee.range + e.radius) continue
       _toEnemy.normalize()
-      if (_toEnemy.dot(this.player.facing) >= cosHalfArc) {
-        const applied = e.takeDamage(
-          PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos,
-        )
-        if (!applied) {
-          this.effects.damageNumber(e.pos, '차단', 'blocked')
-          sfx.enemyHit()
-          continue
-        }
-        this.effects.burst(e.pos, 0xd9f99d, 5, 5)
-        this.effects.damageNumber(e.pos, String(PLAYER.melee.damage))
-        hitAny = true
-        // thorns: 근접 반격 가시 — 근접 의존을 처벌
-        if (e.has('thorns') && !this.player.isDashing) {
-          this.player.takeDamage(4)
-          this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
-        }
+      const applied = e.takeDamage(PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos)
+      if (!applied) {
+        this.effects.damageNumber(e.pos, '차단', 'blocked')
+        sfx.enemyHit()
+        continue
+      }
+      this.effects.burst(e.pos, 0xd9f99d, 5, 5)
+      this.effects.damageNumber(e.pos, String(PLAYER.melee.damage))
+      hitAny = true
+      // thorns: 근접 반격 가시 — 근접 의존을 처벌
+      if (e.has('thorns') && !this.player.isDashing) {
+        this.player.takeDamage(4)
+        this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
       }
     }
-    // 보스도 근접 대상
-    if (this.boss && !this.boss.dead) {
-      _toEnemy.copy(this.boss.pos).sub(this.player.pos)
-      _toEnemy.y = 0
-      const dist = _toEnemy.length()
-      if (dist <= PLAYER.melee.range + BOSS.radius) {
-        _toEnemy.normalize()
-        if (_toEnemy.dot(this.player.facing) >= cosHalfArc) {
-          if (this.boss.takeDamage(PLAYER.melee.damage)) {
-            this.effects.burst(this.boss.pos, 0xffb86b, 6, 6)
-            this.effects.damageNumber(this.boss.pos, String(PLAYER.melee.damage))
-            hitAny = true
-          } else {
-            this.effects.damageNumber(this.boss.pos, '무적', 'blocked')
-          }
-        }
+    if (this.boss && !this.boss.dead && this.boss.pos.distanceTo(this.player.pos) <= PLAYER.melee.range + BOSS.radius) {
+      if (this.boss.takeDamage(PLAYER.melee.damage)) {
+        this.effects.burst(this.boss.pos, 0xffb86b, 6, 6)
+        this.effects.damageNumber(this.boss.pos, String(PLAYER.melee.damage))
+        hitAny = true
+      } else {
+        this.effects.damageNumber(this.boss.pos, '무적', 'blocked')
       }
     }
     if (hitAny) {

@@ -65,20 +65,22 @@ export class Player {
     return this.dashTimer > 0
   }
 
-  /**
-   * 모바일 자동 전투: 최근접 적 방향으로 조준하고 사거리에 맞는 공격을 자동 발동.
-   * 데스크톱과 동일한 쿨다운을 쓰므로 밸런스 왜곡 없음.
-   */
-  autoCombat(nearestDir: THREE.Vector3 | null, nearestDist: number): void {
+  /** 자동 사격(모바일·쉬운·녹화) — 최근접 적으로 조준 후 원거리 발사 */
+  autoFire(nearestDir: THREE.Vector3 | null): void {
     if (!nearestDir) return
     this.facing.copy(nearestDir)
-    if (nearestDist <= PLAYER.melee.range && this.meleeCooldown <= 0) {
-      this.meleeCooldown = PLAYER.melee.cooldown
-      this.wantsMelee = true
-    } else if (nearestDist > PLAYER.melee.range && this.rangedCooldown <= 0) {
+    if (this.rangedCooldown <= 0) {
       this.rangedCooldown = PLAYER.ranged.cooldown
       this.wantsRanged = true
     }
+  }
+
+  /** 근접 자동 발동 요청 (game이 밀착 감지 시 호출). 쿨다운 통과하면 true */
+  requestMelee(): boolean {
+    if (this.meleeCooldown > 0) return false
+    this.meleeCooldown = PLAYER.melee.cooldown
+    this.wantsMelee = true
+    return true
   }
 
   update(dt: number, input: Input): void {
@@ -116,11 +118,7 @@ export class Player {
       if (_aim.lengthSq() > 0.01) this.facing.copy(_aim).normalize()
     }
 
-    // 공격 요청
-    if ((input.meleePressed || input.meleeKeyHeld) && this.meleeCooldown <= 0) {
-      this.meleeCooldown = PLAYER.melee.cooldown
-      this.wantsMelee = true
-    }
+    // 사격은 수동(좌클릭/K). 근접은 game이 밀착 시 자동 발동(requestMelee).
     if ((input.rangedHeld || input.rangedKeyHeld) && this.rangedCooldown <= 0) {
       this.rangedCooldown = PLAYER.ranged.cooldown
       this.wantsRanged = true
