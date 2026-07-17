@@ -56,29 +56,31 @@ export class Hazard {
   }
 }
 
-/** 배치 enum → 월드 좌표 (웨이브 시작 시점의 플레이어 기준) */
+/**
+ * 배치 enum → 월드 좌표. 화면 절대 방향(스폰·텔레메트리와 동일 기준):
+ * player_left = 화면 왼쪽(-X), player_right = 오른쪽(+X). 조준 방향과 무관해야
+ * "왼쪽 회피 → 왼쪽에 가시"가 플레이어 눈에 일치한다.
+ */
 export function resolveHazardPos(
   placement: HazardSpec['placement'],
   playerPos: THREE.Vector3,
-  facing: THREE.Vector3,
 ): THREE.Vector3 {
   const out = new THREE.Vector3()
-  const left = new THREE.Vector3(facing.z, 0, -facing.x)
   switch (placement) {
     case 'center':
       out.set(0, 0, 0)
       break
     case 'player_left':
-      out.copy(playerPos).addScaledVector(left, 7)
+      out.set(playerPos.x - 7, 0, playerPos.z) // 화면 왼쪽
       break
     case 'player_right':
-      out.copy(playerPos).addScaledVector(left, -7)
+      out.set(playerPos.x + 7, 0, playerPos.z) // 화면 오른쪽
       break
     case 'front':
-      out.copy(playerPos).addScaledVector(facing, 8)
+      out.set(playerPos.x, 0, playerPos.z - 8) // 화면 위(먼 쪽)
       break
     case 'behind':
-      out.copy(playerPos).addScaledVector(facing, -8)
+      out.set(playerPos.x, 0, playerPos.z + 8) // 화면 아래(가까운 쪽)
       break
   }
   const r = out.length()

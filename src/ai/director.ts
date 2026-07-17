@@ -1,4 +1,4 @@
-import type { BossDesign, RunContext, TelemetryDigest, WaveDesign } from './schema'
+import type { BossDesign, Modifier, RunContext, TelemetryDigest, WaveDesign } from './schema'
 
 /**
  * L2 디렉터 클라이언트.
@@ -11,7 +11,9 @@ const ENDPOINTS: string[] = [
   ...(import.meta.env.VITE_PROXY_URL ? [import.meta.env.VITE_PROXY_URL] : []),
   'https://overmind-proxy.kwenhwang.workers.dev',
 ]
-const TIMEOUT_MS = 6000
+// 웨이브 설계는 전투 중 프리페치(백그라운드)라 게임을 막지 않음 → 넉넉히.
+// gpt-5.4-mini의 한국어 보스급 응답이 ~16s 걸려 기존 6s는 항상 폴백이었음(치명적).
+const TIMEOUT_MS = 20000
 let sessionToken = ''
 
 /** 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작) */
@@ -149,7 +151,7 @@ export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDe
       if (data.fallback) break // 서버 예산 캡 → 폴백
       if (mySeq !== seq) break // 낡은 응답 폐기
       memory.saveProfile(data.profileUpdate ?? '')
-      return sanitize(data, digest.wave + 1)
+      return enforceDominantCounter(sanitize(data, digest.wave + 1), digest)
     } catch {
       // 다음 엔드포인트로 페일오버
     }
@@ -166,7 +168,7 @@ export async function requestBossDesign(digest: TelemetryDigest): Promise<BossDe
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
         body,
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(20_000), // 보스 판결문은 웨이브5 중 프리페치 → 넉넉히
       })
       if (!res.ok) continue
       const data = (await res.json()) as BossDesign & { fallback?: boolean }
@@ -235,6 +237,65 @@ function sanitize(d: WaveDesign, wave: number): WaveDesign {
   }
 }
 
+const uniq = (a: Modifier[]): Modifier[] => [...new Set(a)]
+
+/**
+ * 관찰→카운터 인과 보장 레이어 (LLM·폴백 공통 최종 단계).
+ *
+ * LLM이 창의적으로 조합하되, '가장 뚜렷한 습관 하나'는 반드시 그에 맞는 시그니처
+ * 카운터로 반영되도록 강제한다 — LLM이 관찰을 흘려버려 "달라지는 게 없다"고 느껴지던
+ * 문제의 근본 해결. counterReason도 실제 수치와 묶어 구체적으로 다시 쓴다.
+ * (LLM은 여전히 구성·수량·2차 조합·대사·기억을 소유 — 이 레이어는 뼈대만 보장)
+ *
+ * 초반(웨이브 1)은 데이터가 적어 관측만 하고 개입하지 않는다.
+ */
+function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDesign {
+  const wave = digest.wave + 1
+  if (wave < 2) return d
+  const dodgeDev = Math.abs(digest.dodgeLeftPct - 50)
+  const weaponDev = Math.abs(digest.meleeUsePct - 50)
+  // 편향이 미미하면(둘 다 <12%p) 개입하지 않고 LLM 설계를 존중
+  if (dodgeDev < 12 && weaponDev < 12) return d
+
+  const spawns = d.spawns.map((s) => ({ ...s, modifiers: [...(s.modifiers ?? [])] }))
+  let hazards = [...(d.hazards ?? [])]
+  let bias = d.spawnBias
+  let reason = d.counterReason
+
+  if (dodgeDev >= 12 && dodgeDev >= weaponDev) {
+    // 회피 방향 봉쇄 — 그쪽에 스폰 몰고 가시밭을 깐다 (도망갈 곳을 없앤다)
+    const left = digest.dodgeLeftPct > 50
+    const pct = Math.max(digest.dodgeLeftPct, digest.dodgeRightPct)
+    bias = left ? 'left' : 'right'
+    hazards = hazards.filter((h) => h.placement !== 'player_left' && h.placement !== 'player_right')
+    hazards.unshift({ type: 'spike_zone', placement: left ? 'player_left' : 'player_right' })
+    reason = `회피 ${left ? '왼쪽' : '오른쪽'} ${pct}% — 그쪽을 가시로 봉쇄한다`
+  } else if (digest.meleeUsePct > 50) {
+    // 근접 집착 — 정면 실드로 접근을 막고 원거리 유닛으로 때린다
+    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'shielded_front'])
+    if (!spawns.some((s) => s.type === 'spitter')) {
+      const flip = spawns.find((s) => s.type === 'drone') ?? spawns[spawns.length - 1]
+      if (flip) flip.type = 'spitter'
+    }
+    reason = `근접 집착 ${digest.meleeUsePct}% — 정면 실드로 막고 원거리로 때린다`
+  } else {
+    // 카이팅(거리 유지) — 멀수록 가속하는 돌격 유닛으로 거리를 좁힌다
+    let hasDrone = false
+    for (const s of spawns)
+      if (s.type === 'drone') {
+        s.modifiers = uniq([...s.modifiers, 'enrage_far'])
+        hasDrone = true
+      }
+    if (!hasDrone && spawns[0]) {
+      spawns[0].type = 'drone'
+      spawns[0].modifiers = uniq([...spawns[0].modifiers, 'enrage_far'])
+    }
+    reason = `거리 유지 ${digest.rangedUsePct}% — 멀수록 가속하는 돌격으로 좁힌다`
+  }
+
+  return { ...d, spawns, hazards: hazards.slice(0, 2), spawnBias: bias, counterReason: reason }
+}
+
 /**
  * 규칙기반 폴백 — 프록시 불통이어도 게임은 계속된다 (심사 안전망).
  * 텔레메트리를 단순 규칙으로 반영해 "덜 똑똑한 오버마인드"로 동작.
@@ -253,10 +314,12 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
         { type: 'brute', count: Math.max(0, wave - 2) },
       ]
   const dodgeLeft = digest.dodgeLeftPct > 60
-  return {
+  const dodgeRight = digest.dodgeRightPct > 60
+  const base: WaveDesign = {
     spawns,
+    // 방향 가시는 회피 편향이 뚜렷할 때만 (중립인데 엉뚱한 방향에 가시 까는 것 방지)
     hazards:
-      wave >= 3
+      wave >= 3 && (dodgeLeft || dodgeRight)
         ? [{ type: 'spike_zone', placement: dodgeLeft ? 'player_left' : 'player_right' }]
         : [],
     spawnBias: dodgeLeft ? 'left' : digest.dodgeRightPct > 60 ? 'right' : 'surround',
@@ -268,6 +331,8 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
     mood: digest.playerHpPct < 35 ? 'confident' : 'angry',
     aggression: Math.min(5, 2 + Math.floor(wave / 2)) as WaveDesign['aggression'],
   }
+  // 폴백도 동일한 인과 보장 레이어를 거친다 (LLM 유무와 무관하게 습관 카운터 일관)
+  return enforceDominantCounter(base, digest)
 }
 
 const TAUNT_POOL = [

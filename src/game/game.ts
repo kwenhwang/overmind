@@ -17,13 +17,12 @@ import { Telemetry } from '../ai/telemetry'
 import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL, submitScore, fetchLeaderboard } from '../ai/director'
 import { Recorder } from './recorder'
 import { pickThree } from './upgrades'
-import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
+import type { BossDesign, BossPhase, TelemetryDigest, WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
 type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | 'victory'
 
 const _toEnemy = new THREE.Vector3()
-const _threat = new THREE.Vector3()
 const _up = new THREE.Vector3(0, 1, 0)
 
 /** 녹화 연기용 — 데스크톱에서도 모바일식 자동 조준·공격 */
@@ -61,6 +60,10 @@ export class Game {
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
+  /** 이 웨이브에 대해 다음 설계를 이미 프리페치했는지 (중복 요청 방지) */
+  private prefetchedWave = -1
+  /** 현재 웨이브에 스폰된 적 수 (프리페치 트리거 임계 계산용) */
+  private waveEnemyCount = 0
   private pendingSpawn: PendingSpawn | null = null
   private hazardZones: Hazard[] = []
   private boss: Boss | null = null
@@ -114,6 +117,10 @@ export class Game {
       state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
       hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
       boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
+      design: this.pendingDesign
+        ? { bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
+        : null,
+      prefetchedWave: this.prefetchedWave,
       dodge: this.telemetry.debugDodge(),
       nearest: this.enemies.length ? Math.round(this.findNearestEnemy()?.pos.distanceTo(this.player.pos) ?? -1) : -1,
       proj: this.projectiles.list.length,
@@ -130,6 +137,8 @@ export class Game {
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
+    // 검증용: 임의 텔레메트리 → 카운터 설계 (인과 보장 레이어 확인)
+    ;(window as unknown as Record<string, unknown>).__designFor = (d: TelemetryDigest) => fallbackDesign(d)
 
     // 쉬운 조작 토글 (타이틀) — localStorage 저장, 터치도 항상 자동전투라 데스크톱에서만 노출
     const easyToggle = document.getElementById('easy-toggle') as HTMLInputElement | null
@@ -167,6 +176,8 @@ export class Game {
     this.boss = null
     this.bossDesign = null
     this.bossDeathTimer = -1
+    this.prefetchedWave = -1
+    this.waveEnemyCount = 0
     this.upgradePending = false
     this.scoreSubmitted = false
     this.hud.hideBossBar()
@@ -177,7 +188,7 @@ export class Game {
 
     this.player = new Player(this.world.scene)
     this.player.onDash = (dir) => {
-      this.telemetry.recordDash(dir, this.nearestThreatDir(_threat))
+      this.telemetry.recordDash(dir)
       sfx.dash()
       // mirror_dash 모디파이어: 오버마인드가 회피 자체에 반응한다
       for (const e of this.enemies) e.mirrorDash(dir)
@@ -202,16 +213,23 @@ export class Game {
   private startIntermission(): void {
     this.state = 'intermission'
     this.intermissionTimer = WAVE_INTERMISSION_SEC
-    this.pendingDesign = null
+    // pendingDesign은 프리페치가 채웠을 수 있으므로 여기서 지우지 않는다 (재요청 시 else에서 초기화)
     this.clearHazards()
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
     const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
     this.hud.showReport(digest, memory.profile()) // 오버마인드가 "본 것"과 "기억"을 노출
-    requestWaveDesign(digest).then((design) => {
-      this.pendingDesign = design
-      this.hud.showCounter(design.counterReason)
-    })
+    if (this.wave === 0) {
+      // 첫 웨이브: 아직 관측 데이터가 없어 LLM이 할 일이 없음 → 폴백 즉시 (게임 시작 지연 방지)
+      this.pendingDesign = fallbackDesign(digest)
+    } else if (this.prefetchedWave === this.wave) {
+      // 전투 중 프리페치가 이미 이 웨이브의 설계를 받았으면 그대로 사용 (LLM 대사 노출)
+      if (this.pendingDesign) this.hud.showCounter(this.pendingDesign.counterReason)
+    } else {
+      // 빠른 클리어 등으로 프리페치가 없으면 지금 요청 — 업그레이드 선택 시간 동안 도착
+      this.pendingDesign = null
+      this.requestDesign(digest)
+    }
 
     // 웨이브 1+ 클리어 후엔 업그레이드 3택 (성장 — 오버마인드 상승에 맞대응). 선택 전엔 다음 웨이브 대기.
     if (this.wave >= 1) {
@@ -222,6 +240,14 @@ export class Game {
         this.upgradePending = false
       })
     }
+  }
+
+  /** 웨이브 설계 요청 (프리페치·인터미션 공용). 도착 시 pendingDesign 갱신 + 인터미션이면 카운터 노출 */
+  private requestDesign(digest: TelemetryDigest): void {
+    requestWaveDesign(digest).then((design) => {
+      this.pendingDesign = design
+      if (this.state === 'intermission') this.hud.showCounter(design.counterReason)
+    })
   }
 
   private startWave(): void {
@@ -242,12 +268,12 @@ export class Game {
     // 해저드 — 텔레그래프 시점부터 보여서 배치 의도가 읽히게
     this.clearHazards()
     for (const h of (design.hazards ?? []).slice(0, 2)) {
-      const pos = resolveHazardPos(h.placement, this.player.pos, this.player.facing)
+      const pos = resolveHazardPos(h.placement, this.player.pos)
       this.hazardZones.push(new Hazard(h, pos, this.world.scene))
     }
 
     // 스폰은 경고 링 텔레그래프 후 — "의도된 배치"로 읽히게
-    const plan = planWaveSpawns(design, this.player.pos, this.player.facing)
+    const plan = planWaveSpawns(design, this.player.pos)
     this.pendingSpawn = {
       plan,
       aggression: design.aggression,
@@ -275,10 +301,13 @@ export class Game {
     this.verdictTimer = -1
     this.clearHazards()
     this.hud.showIntermission('최종 프로토콜 기동…')
-    const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
-    requestBossDesign(digest).then((design) => {
-      this.bossDesign = design
-    })
+    // 웨이브5 중 프리페치로 이미 받았으면 그대로 사용 (LLM 판결문 노출). 아니면 지금 요청.
+    if (!this.bossDesign) {
+      const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+      requestBossDesign(digest).then((design) => {
+        this.bossDesign = design
+      })
+    }
   }
 
   private updateBossIntro(dt: number): void {
@@ -317,7 +346,7 @@ export class Game {
     this.effects.shake(0.35)
     this.clearHazards()
     for (const h of (phase.hazards ?? []).slice(0, 2)) {
-      const pos = resolveHazardPos(h.placement, this.player.pos, this.player.facing)
+      const pos = resolveHazardPos(h.placement, this.player.pos)
       this.hazardZones.push(new Hazard(h, pos, this.world.scene))
     }
     if (this.boss) {
@@ -405,14 +434,14 @@ export class Game {
 
     this.input.updateAim()
     this.player.update(combatDt, this.input)
-    this.telemetry.tick(combatDt, this.player.pos, this.player.moveDir, this.nearestThreatDir(_threat))
+    this.telemetry.tick(combatDt, this.player.pos, this.player.moveDir)
 
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
       const elapsed = WAVE_INTERMISSION_SEC - this.intermissionTimer
-      // 업그레이드 선택 대기 중이면 웨이브 시작 보류 (선택이 곧 진행 트리거).
-      // 선택 완료 후: LLM 설계 도착 시 최소 연출(2.5초) 후, 미도착이면 유예(-4초) 뒤 폴백 시작.
-      if (!this.upgradePending && ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -4)) {
+      // 업그레이드 선택 대기 중이면 웨이브 시작 보류 (선택이 곧 진행 트리거 — 선택 시간이 LLM 지연을 흡수).
+      // 선택 완료 후: LLM 설계 도착 시 최소 연출(2.5초) 후, 미도착이면 유예(-5초) 뒤 폴백 시작.
+      if (!this.upgradePending && ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -5)) {
         this.startWave()
       }
     } else if (this.state === 'bossIntro') {
@@ -487,6 +516,7 @@ export class Game {
       const { plan, aggression } = this.pendingSpawn
       this.clearPendingSpawn()
       this.enemies = spawnEnemies(plan, aggression, this.world.scene)
+      this.waveEnemyCount = this.enemies.length
       for (const e of this.enemies) this.effects.burst(e.pos, e.color, 4, 4)
       sfx.waveStart()
     }
@@ -542,6 +572,23 @@ export class Game {
       }
     }
 
+    // 설계 프리페치 — LLM 응답(~16s)이 인터미션/보스인트로에 늦지 않도록 전투 중 미리 요청.
+    // 이 웨이브가 60% 정리됐을 때(대부분의 회피·사격 습관 확보) 발사 → 남은 시간이 LLM 지연을 흡수.
+    if (
+      !this.boss && this.prefetchedWave !== this.wave &&
+      !this.pendingSpawn && this.waveEnemyCount > 0 &&
+      this.enemies.length <= Math.max(2, Math.ceil(this.waveEnemyCount * 0.4))
+    ) {
+      this.prefetchedWave = this.wave
+      const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+      if (this.wave < TOTAL_WAVES) {
+        this.requestDesign(digest) // 다음 웨이브 설계
+      } else {
+        // 최종 웨이브 → 보스 판결문(누적 프로파일의 총결산, 최고의 LLM 순간) 프리페치
+        requestBossDesign(digest).then((d) => (this.bossDesign = d))
+      }
+    }
+
     if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
       this.score += SCORE.waveClear
       this.rl?.addReward(5)
@@ -583,26 +630,6 @@ export class Game {
     this.score += gained
     this.effects.damageNumber(e.pos, `+${gained}`, 'score')
     this.hud.setScore(this.score, this.combo)
-  }
-
-  /** 최근접 위협(적 또는 보스) 방향 (정규화). 없으면 0벡터 — 회피 성향 측정 기준 */
-  private nearestThreatDir(out: THREE.Vector3): THREE.Vector3 {
-    out.set(0, 0, 0)
-    let bestDist = Infinity
-    const e = this.findNearestEnemy()
-    if (e) {
-      bestDist = e.pos.distanceToSquared(this.player.pos)
-      out.copy(e.pos)
-    }
-    if (this.boss && !this.boss.dead) {
-      const d = this.boss.pos.distanceToSquared(this.player.pos)
-      if (d < bestDist) {
-        bestDist = d
-        out.copy(this.boss.pos)
-      }
-    }
-    if (bestDist === Infinity) return out.set(0, 0, 0)
-    return out.sub(this.player.pos).setY(0).normalize()
   }
 
   private findNearestEnemy(): Enemy | null {

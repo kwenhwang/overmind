@@ -19,29 +19,22 @@ export class Telemetry {
   private now = 0
 
   /**
-   * 매 프레임 호출 — 위치 + 이동 방향을 상시 샘플링.
-   * 회피 성향 = '가장 가까운 위협을 두고 어느 쪽으로 도는가'(스트레이프 방향).
-   * 조준(facing)이 아니라 위협 방향 기준이라 자동조준·마우스 무관하게 안정적.
-   * (기존 버그: 대시할 때만·조준 기준으로 기록 → 영원히 50:50)
+   * 매 프레임 호출 — 위치 + 이동 방향 샘플링.
+   * 회피 성향 = 화면 기준 좌/우 (카메라가 고정 탑다운이라 월드 -X = 화면 왼쪽 = A키).
+   * 플레이어 체감("왼쪽으로 피했다")과 측정을 일치시킴 — 위협 상대 기준은 체감과 어긋났음.
    */
-  tick(dt: number, playerPos: THREE.Vector3, moveDir: THREE.Vector3, threatDir: THREE.Vector3): void {
+  tick(dt: number, playerPos: THREE.Vector3, moveDir: THREE.Vector3): void {
     this.now += dt
     this.distSum += playerPos.length()
     this.distSamples++
-    if (moveDir.lengthSq() > 0.01 && threatDir.lengthSq() > 0.01) {
-      // 위협 기준 이동의 좌/우 성분 (cross>0 = 위협의 왼쪽으로 회전). 프레임 시간 가중.
-      const cross = threatDir.x * moveDir.z - threatDir.z * moveDir.x
-      if (cross > 0.1) this.dodgeLeft += dt
-      else if (cross < -0.1) this.dodgeRight += dt
-    }
+    if (moveDir.x < -0.1) this.dodgeLeft += dt // 화면 왼쪽(-X)
+    else if (moveDir.x > 0.1) this.dodgeRight += dt // 화면 오른쪽(+X)
   }
 
   /** 대시는 의도적 회피 신호 — 강하게 가중 (0.5초치 이동에 해당) */
-  recordDash(dir: THREE.Vector3, threatDir: THREE.Vector3): void {
-    if (threatDir.lengthSq() < 0.01) return
-    const cross = threatDir.x * dir.z - threatDir.z * dir.x
-    if (cross > 0.1) this.dodgeLeft += 0.5
-    else if (cross < -0.1) this.dodgeRight += 0.5
+  recordDash(dir: THREE.Vector3): void {
+    if (dir.x < -0.1) this.dodgeLeft += 0.5
+    else if (dir.x > 0.1) this.dodgeRight += 0.5
   }
 
   recordMelee(): void {
