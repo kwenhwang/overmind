@@ -3,10 +3,10 @@ export const ARENA_RADIUS = 22
 export const PLAYER = {
   radius: 0.55,
   speed: 9,
-  hp: 100,
+  hp: 120,
   dashSpeed: 26,
   dashDuration: 0.18,
-  dashCooldown: 0.9,
+  dashCooldown: 0.7,
   melee: { damage: 34, range: 3.2, arcDeg: 140, cooldown: 0.38 },
   ranged: { damage: 12, speed: 30, cooldown: 0.22, projectileRadius: 0.18 },
 } as const
@@ -26,7 +26,7 @@ export const ENEMY_TYPES = {
   },
   // 저속 고체력 탱커 — 플레이어를 구석으로 모는 압박용
   brute: {
-    radius: 0.95, speed: 2.6, hp: 90, damage: 22,
+    radius: 0.95, speed: 2.6, hp: 90, damage: 16,
     attackRange: 1.9, attackCooldown: 1.6, color: 0xd9a04f,
   },
 } as const

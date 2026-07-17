@@ -174,7 +174,7 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
  * (설계 의도는 유지하되 강도만 웨이브에 맞게 조인다.)
  */
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
-  const maxEnemies = Math.min(4 + Math.ceil(wave * 1.5), 12) // W1=6 … W5=12
+  const maxEnemies = Math.min(3 + wave, 9) // W1=4 … W5=8 (완화 — 봇 보스도달 0% 대응)
   const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
   const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
 
