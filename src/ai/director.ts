@@ -46,6 +46,24 @@ export async function uploadDiag(payload: { img: string; info: unknown }): Promi
   return false
 }
 
+/** 게임플레이 로그(RL 데이터셋) 업로드 — ?rl 에피소드 종료 시 */
+export async function uploadRL(episode: object): Promise<boolean> {
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/rl`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(episode),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (res.ok) return true
+    } catch {
+      /* 다음 엔드포인트 */
+    }
+  }
+  return false
+}
+
 const PROFILE_KEY = 'overmind-profile'
 const RUNS_KEY = 'overmind-runs'
 const OUTCOME_KEY = 'overmind-last-outcome'

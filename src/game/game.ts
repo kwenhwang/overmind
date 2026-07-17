@@ -14,7 +14,8 @@ import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag } from '../ai/director'
+import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL } from '../ai/director'
+import { Recorder } from './recorder'
 import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
@@ -25,6 +26,12 @@ const _threat = new THREE.Vector3()
 
 /** 녹화 연기용 — 데스크톱에서도 모바일식 자동 조준·공격 */
 const AUTO_AIM = new URLSearchParams(location.search).has('autoaim')
+/** ?rl — 게임플레이 로깅(강화학습 데이터셋). 기본 off (오버헤드 0) */
+const RL_MODE = new URLSearchParams(location.search).has('rl')
+/** 쉬운 조작 — 자동 조준·사격 (이동+대시만). 아이·입문자용, localStorage 저장 */
+function easyMode(): boolean {
+  return localStorage.getItem('overmind-easy') === '1'
+}
 
 interface PendingSpawn {
   plan: SpawnPlan[]
@@ -43,6 +50,10 @@ export class Game {
   private projectiles: ProjectilePool
   private telemetry = new Telemetry()
   private state: State = 'title'
+  private easy = false
+  private rl: Recorder | null = null
+  private tickFire = false
+  private tickMelee = false
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
@@ -115,6 +126,15 @@ export class Game {
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
+
+    // 쉬운 조작 토글 (타이틀) — localStorage 저장, 터치도 항상 자동전투라 데스크톱에서만 노출
+    const easyToggle = document.getElementById('easy-toggle') as HTMLInputElement | null
+    const easyLabel = document.getElementById('easy-label')
+    if (easyToggle && easyLabel) {
+      if (IS_TOUCH) easyLabel.style.display = 'none'
+      easyToggle.checked = easyMode()
+      easyToggle.onchange = () => localStorage.setItem('overmind-easy', easyToggle.checked ? '1' : '0')
+    }
     // ?autostart — 헤드리스 검증·영상 촬영용 즉시 시작
     if (new URLSearchParams(location.search).has('autostart')) {
       this.startRun()
@@ -131,6 +151,8 @@ export class Game {
   }
 
   private startRun(): void {
+    this.easy = easyMode() // 타이틀 토글 반영
+    this.rl = RL_MODE ? new Recorder() : null
     for (const e of this.enemies) this.world.scene.remove(e.root)
     this.enemies = []
     this.projectiles.clear()
@@ -405,10 +427,24 @@ export class Game {
     if (this.player.hp < hpAtFrameStart) {
       const taken = hpAtFrameStart - this.player.hp
       this.telemetry.recordDamageTaken(taken)
+      this.rl?.addReward(-0.1 * taken)
       sfx.playerHurt()
       this.effects.shake(0.55)
       this.effects.damageNumber(this.player.pos, `-${Math.round(taken)}`, 'player')
     }
+
+    // RL 로깅 — 이번 틱 (관측·행동·보상). 전투 중에만 (?rl 모드)
+    if (this.rl && this.state === 'playing') {
+      this.rl.tick(combatDt, this.player, this.enemies, this.boss?.dead ? null : (this.boss?.pos ?? null), this.wave, {
+        move: this.player.moveDir,
+        dash: this.player.isDashing,
+        fire: this.tickFire,
+        melee: this.tickMelee,
+        aim: this.player.facing,
+      })
+    }
+    this.tickFire = false
+    this.tickMelee = false
 
     this.effects.update(combatDt)
     this.hud.setHp((this.player.hp / PLAYER.hp) * 100)
@@ -438,8 +474,8 @@ export class Game {
   }
 
   private updateCombat(dt: number): void {
-    // 모바일(또는 ?autoaim — 녹화용): 최근접 표적(적 또는 보스) 자동 조준·공격
-    if (IS_TOUCH || AUTO_AIM) {
+    // 모바일·쉬운모드·녹화(?autoaim): 최근접 표적(적 또는 보스) 자동 조준·공격
+    if (IS_TOUCH || AUTO_AIM || this.easy) {
       const nearest = this.findNearestEnemy()
       let targetPos = nearest?.pos ?? null
       if (this.boss && !this.boss.dead) {
@@ -458,12 +494,14 @@ export class Game {
 
     const attacks = this.player.consumeAttacks()
     if (attacks.melee) {
+      this.tickMelee = true
       this.telemetry.recordMelee()
       sfx.meleeSwing()
       this.effects.meleeArc(this.player.pos, this.player.facing, PLAYER.melee.range, PLAYER.melee.arcDeg)
       this.meleeSweep()
     }
     if (attacks.ranged) {
+      this.tickFire = true
       this.telemetry.recordRanged()
       sfx.shoot()
       this.projectiles.spawn(
@@ -485,6 +523,7 @@ export class Game {
 
     if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
       this.score += SCORE.waveClear
+      this.rl?.addReward(5)
       this.hud.setScore(this.score, this.combo)
       this.effects.hitstop(0.28) // 클리어 슬로모
       if (this.wave >= TOTAL_WAVES) this.startBossIntro()
@@ -494,6 +533,7 @@ export class Game {
 
   private onEnemyKilled(e: Enemy): void {
     this.telemetry.recordKill(e.type)
+    this.rl?.addReward(1)
     sfx.enemyDie()
     this.effects.burst(e.pos, e.color, 14, 8)
     this.effects.shake(0.25)
@@ -663,6 +703,12 @@ export class Game {
   private endRun(victory: boolean): void {
     this.state = victory ? 'victory' : 'gameover'
     memory.endRun(victory, this.wave)
+    // RL 에피소드 종료 — 보상 마감 후 업로드 (개발자가 /rl로 조회, 학습 데이터셋)
+    if (this.rl) {
+      this.rl.addReward(victory ? 20 : -10)
+      void uploadRL(this.rl.finish(victory ? 'victory' : 'died', this.wave, this.score))
+      this.rl = null
+    }
     if (victory) sfx.victory()
     else sfx.defeat()
     const best = Math.max(this.score, Number(localStorage.getItem('overmind-best') ?? 0))

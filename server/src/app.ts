@@ -85,6 +85,21 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
   })
 
+  // 게임플레이 로그(RL 데이터셋) 업로드/조회 — ?rl 모드 에피소드. KV 재사용.
+  app.post('/rl', async (c) => {
+    const env = getEnv(c)
+    if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    const body = await c.req.text()
+    if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
+    await env.DIAG.put('rl-latest', body, { expirationTtl: 604800 }) // 7일
+    return c.json({ ok: true })
+  })
+  app.get('/rl', async (c) => {
+    const env = getEnv(c)
+    const v = env.DIAG ? await env.DIAG.get('rl-latest') : null
+    return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
+  })
+
   // 게임 시작 시 1회 — 단기 서명 토큰 발급 (봇 진입 장벽)
   app.get('/session', async (c) => {
     const env = getEnv(c)
