@@ -19,6 +19,11 @@ export interface Env {
   MAX_DAILY_CALLS?: string
   /** 세션 토큰 HMAC 서명 키. 미설정 시 토큰 검증 생략(하위호환) */
   SESSION_SECRET?: string
+  /** 진단 캡처 저장 KV (게임 내 진단 버튼 업로드) */
+  DIAG?: {
+    put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
+    get(key: string): Promise<string | null>
+  }
 }
 
 const RATE_LIMIT_PER_MIN = 10
@@ -62,6 +67,23 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   })
 
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // 진단 캡처 업로드 — 게임 내 '진단 전송' 버튼이 화면(dataURL)+렌더 정보를 올림.
+  // 개발자가 사용자 실기기 화면을 직접 확인하기 위한 통로 (최신본 'latest' 고정키).
+  app.post('/diag', async (c) => {
+    const env = getEnv(c)
+    if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    const body = await c.req.text() // {img, info} JSON 문자열 (최대 ~수백KB)
+    if (body.length > 20 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
+    await env.DIAG.put('latest', body, { expirationTtl: 86400 })
+    return c.json({ ok: true })
+  })
+
+  app.get('/diag', async (c) => {
+    const env = getEnv(c)
+    const v = env.DIAG ? await env.DIAG.get('latest') : null
+    return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
+  })
 
   // 게임 시작 시 1회 — 단기 서명 토큰 발급 (봇 진입 장벽)
   app.get('/session', async (c) => {

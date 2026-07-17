@@ -42,7 +42,7 @@ export async function loadModels(): Promise<void> {
             // 플레이어(전투기)는 원래 재질 유지 — emissive 주면 하얗게 워시아웃돼 멋이 죽음.
             if (name !== 'player' && mat.emissive.getHex() === 0x000000) {
               mat.emissive.copy(mat.color)
-              mat.emissiveIntensity = 0.5
+              mat.emissiveIntensity = 0.85
             }
           }
         })

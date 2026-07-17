@@ -9,3 +9,8 @@ compatibility_date = "2026-07-01"
 MODEL = "gpt-5.4-mini"
 MAX_DAILY_CALLS = "2000"
 ALLOWED_ORIGINS = "https://kwenhwang.github.io,http://localhost:5199,http://localhost:4173"
+
+# 진단 캡처 저장소 (게임 내 '진단 전송' 버튼 → 화면+렌더정보 업로드)
+[[kv_namespaces]]
+binding = "DIAG"
+id = "abd5f7b2f341440da3dd6ca1b8023c4c"

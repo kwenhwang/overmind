@@ -28,6 +28,24 @@ export async function initSession(): Promise<void> {
   }
 }
 
+/** 진단 캡처 업로드 (게임 내 '진단 전송' 버튼) — 개발자가 사용자 실기기 화면 확인용 */
+export async function uploadDiag(payload: { img: string; info: unknown }): Promise<boolean> {
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/diag`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (res.ok) return true
+    } catch {
+      /* 다음 엔드포인트 */
+    }
+  }
+  return false
+}
+
 const PROFILE_KEY = 'overmind-profile'
 const RUNS_KEY = 'overmind-runs'
 const OUTCOME_KEY = 'overmind-last-outcome'

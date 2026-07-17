@@ -99,6 +99,14 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   to { opacity: 0; margin-top: -46px; }
 }
 
+#diag-btn {
+  position: absolute; right: 16px; bottom: 16px; pointer-events: auto; cursor: pointer;
+  padding: 7px 12px; font-size: 12px; color: #7dd3fc;
+  background: rgba(8,12,18,.8); border: 1px solid #1e3a4a; border-radius: 6px;
+}
+#diag-btn:hover { background: rgba(20,30,42,.9); }
+#diag-btn.sent { color: #4ade80; border-color: #2f6b45; }
+
 #joy-base {
   position: absolute; width: 128px; height: 128px; border-radius: 50%;
   border: 2px solid rgba(74, 222, 128, .35); background: rgba(74, 222, 128, .07);

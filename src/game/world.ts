@@ -23,7 +23,8 @@ export class World {
   private noRender = new URLSearchParams(location.search).has('norender')
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
+    // preserveDrawingBuffer: 진단 캡처(toDataURL)가 검은 화면이 아닌 실제 프레임을 담게 함
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.shadowMap.enabled = true
@@ -174,5 +175,22 @@ export class World {
     if (this.noRender) return
     if (this.useBloom) this.composer.render()
     else this.renderer.render(this.scene, this.camera)
+  }
+
+  /** 진단용 — 현재 화면 PNG dataURL + 렌더러/기기 정보 */
+  captureDiag(): { img: string; info: Record<string, unknown> } {
+    const gl = this.renderer.getContext()
+    const dbgExt = gl.getExtension('WEBGL_debug_renderer_info')
+    return {
+      img: this.renderer.domElement.toDataURL('image/png'),
+      info: {
+        gpu: dbgExt ? gl.getParameter(dbgExt.UNMASKED_RENDERER_WEBGL) : 'unknown',
+        glVersion: gl.getParameter(gl.VERSION),
+        useBloom: this.useBloom,
+        pixelRatio: this.renderer.getPixelRatio(),
+        size: `${innerWidth}x${innerHeight}`,
+        ua: navigator.userAgent,
+      },
+    }
   }
 }

@@ -14,7 +14,7 @@ import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, requestBossDesign, fallbackDesign, memory } from '../ai/director'
+import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag } from '../ai/director'
 import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
@@ -64,6 +64,18 @@ export class Game {
   constructor(canvas: HTMLCanvasElement) {
     this.world = new World(canvas)
     this.input = new Input(this.world.camera)
+
+    // 진단 전송 버튼 — 사용자 실기기 화면+렌더정보를 개발자에게 업로드
+    const diagBtn = document.getElementById('diag-btn') as HTMLButtonElement | null
+    if (diagBtn) {
+      diagBtn.onclick = async () => {
+        diagBtn.textContent = '전송 중…'
+        const ok = await uploadDiag(this.world.captureDiag())
+        diagBtn.textContent = ok ? '전송됨 ✓' : '전송 실패'
+        diagBtn.classList.toggle('sent', ok)
+        setTimeout(() => (diagBtn.textContent = '진단 전송'), 3000)
+      }
+    }
     this.projectiles = new ProjectilePool(this.world.scene)
     this.effects = new Effects(this.world.scene, this.world.camera)
 
