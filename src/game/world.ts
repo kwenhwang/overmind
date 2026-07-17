@@ -15,8 +15,11 @@ export class World {
   private camTarget = new THREE.Vector3()
   private ring!: THREE.Mesh
   private time = 0
-  /** 저사양(소프트웨어 GL 등)에서 블룸은 fps를 죽임 — 자동/수동으로 끔 */
-  private useBloom = !new URLSearchParams(location.search).has('nobloom')
+  /**
+   * 블룸 기본 OFF — 강하면 적 모델(밝은 흰 부분)을 하얗게 태워 형체가 사라짐(실측).
+   * 배경 발광은 환경맵 + 링 emissive로 충분. ?bloom 으로만 켜는 실험 옵션으로 격하.
+   */
+  private useBloom = new URLSearchParams(location.search).has('bloom')
   private noRender = new URLSearchParams(location.search).has('norender')
 
   constructor(canvas: HTMLCanvasElement) {
@@ -40,10 +43,11 @@ export class World {
     this.camera.position.copy(this.camOffset)
     this.camera.lookAt(0, 0, 0)
 
-    // 네온 발광 — emissive가 임계값(0.85)을 넘는 픽셀만 부드럽게 번짐
+    // 네온 발광 — 아주 밝은 픽셀(링 네온 등)만 은은히 번짐.
+    // strength/threshold를 약하게: 과하면 적 모델까지 하얗게 태워 형체가 사라진다(실측).
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
-    const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.5, 0.82)
+    const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.92)
     this.composer.addPass(bloom)
 
     this.buildLights()
