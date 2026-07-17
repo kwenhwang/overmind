@@ -10,6 +10,16 @@ const registry = new Map<ModelName, THREE.Group>()
  * CC0 외부 모델(Quaternius)은 크기·원점·정면이 제각각이라 로드 시 정규화한다.
  * 게임 코드는 원점=시각 중심, 정면 -Z 를 가정하므로 그에 맞춘다.
  */
+/** 적 종류별 정체성 색 — CC0 모델이 전부 같은 황금 팔레트라 종류 구분이 안 됨.
+ *  채도 높은(몸통) 머티리얼만 이 색으로 교체하고 회색·검정 디테일은 유지. */
+const ENEMY_TINT: Partial<Record<ModelName, number>> = {
+  // 적은 난색 계열로 통일 → 플레이어(핑크)와 확실히 분리. 서로는 명도/채도로 구분.
+  drone: 0xe8402a, // 선명 빨강 — 돌격
+  spitter: 0xf5c518, // 노랑 — 원거리 (보라는 플레이어 핑크와 헷갈려서 변경)
+  brute: 0xe87a1a, // 주황 — 탱커
+  boss: 0xb01010, // 암적 — 보스
+}
+
 const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
   player: { size: 2.8, faceY: 0 }, // 전투기 노즈가 -Z(진행/조준 방향) 향하게 (PI는 앞뒤 반대였음)
   drone: { size: 2.2, faceY: 0 },
@@ -38,9 +48,14 @@ export async function loadModels(): Promise<void> {
           if (mat?.isMeshStandardMaterial) {
             mat.metalness = Math.min(mat.metalness, 0.15)
             mat.roughness = Math.max(mat.roughness, 0.55)
-            // (emissive 부여 제거 — ANGLE/D3D11 일부 GPU에서 emissive 세팅된 적 모델이
-            //  통째로 렌더 실패했음(배지·해저드는 보이나 적 본체만 사라짐, 진단으로 확정).
-            //  가시성은 조명+환경맵으로 충분 — 같은 재질의 플레이어가 정상 렌더됨.)
+            // (emissive 부여 안 함 — ANGLE/D3D11에서 렌더 깨짐. 가시성은 조명+환경맵으로.)
+            // 종류별 색 구분: 채도 높은(몸통) 머티리얼만 정체성 색으로 교체
+            const tint = ENEMY_TINT[name]
+            if (tint) {
+              const hsl = { h: 0, s: 0, l: 0 }
+              mat.color.getHSL(hsl)
+              if (hsl.s > 0.25) mat.color.setHex(tint)
+            }
           }
         })
         registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
