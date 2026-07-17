@@ -34,11 +34,16 @@ export async function loadModels(): Promise<void> {
           const mesh = o as THREE.Mesh
           if (!mesh.isMesh) return
           mesh.castShadow = true
-          // 금속도 억제 + 거칠기 상향: 환경 반사가 약한 씬에서 금속 재질이 검게 죽는 것 방지
           const mat = mesh.material as THREE.MeshStandardMaterial
           if (mat?.isMeshStandardMaterial) {
             mat.metalness = Math.min(mat.metalness, 0.15)
             mat.roughness = Math.max(mat.roughness, 0.55)
+            // 자체발광 부여: 조명·환경맵이 약한 기기에서도 형체가 확실히 보이게.
+            // (실측: 조명 의존 몸통은 일부 GPU에서 어둡게 죽고 emissive 눈만 보였음)
+            if (mat.emissive.getHex() === 0x000000) {
+              mat.emissive.copy(mat.color)
+              mat.emissiveIntensity = 0.5
+            }
           }
         })
         registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
