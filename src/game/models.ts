@@ -1,9 +1,14 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js'
 
 export type ModelName = 'player' | 'drone' | 'spitter' | 'brute' | 'boss'
 
-const registry = new Map<ModelName, THREE.Group>()
+interface ModelEntry {
+  scene: THREE.Object3D
+  animations: THREE.AnimationClip[]
+}
+const registry = new Map<ModelName, ModelEntry>()
 
 /**
  * 유닛별 목표 시각 크기(수평 최대변) + 정면 회전(Y, 라디안).
@@ -58,7 +63,7 @@ export async function loadModels(): Promise<void> {
             }
           }
         })
-        registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
+        registry.set(name, { scene: normalize(gltf.scene, NORMALIZE[name]), animations: gltf.animations })
       } catch (err) {
         console.warn(`model load failed: ${name}`, err)
       }
@@ -88,16 +93,38 @@ function normalize(scene: THREE.Object3D, cfg: { size: number; faceY: number }):
   return outer
 }
 
-/** 인스턴스 생성 — 머티리얼까지 복제해 개체별 이미시브 연출이 서로 간섭하지 않게 */
-export function instantiate(name: ModelName): THREE.Group | null {
+/**
+ * 인스턴스 생성. 스킨드 메시는 SkeletonUtils.clone으로 복제해야 뼈대가 안 깨짐
+ * (일반 clone은 스켈레톤 미복제 → ANGLE/D3D11에서 렌더 실패). 머티리얼도 개체 복제.
+ */
+export function instantiate(name: ModelName): THREE.Object3D | null {
   const src = registry.get(name)
   if (!src) return null
-  const clone = src.clone(true)
-  clone.traverse((o) => {
+  const root = skeletonClone(src.scene)
+  root.traverse((o) => {
     const mesh = o as THREE.Mesh
     if (mesh.isMesh) mesh.material = (mesh.material as THREE.Material).clone()
   })
-  return clone
+  return root
+}
+
+/** 모델의 애니메이션 클립 (mixer 재생용). 이름 예: 'CharacterArmature|Run' */
+export function getAnimations(name: ModelName): THREE.AnimationClip[] {
+  return registry.get(name)?.animations ?? []
+}
+
+/** 클립 이름에서 논리 동작 매칭 (모델마다 Run/Walk, Dead/Death 등 이름 다름) */
+export function findClip(
+  clips: THREE.AnimationClip[],
+  kind: 'idle' | 'move' | 'attack' | 'death',
+): THREE.AnimationClip | null {
+  const pats: Record<typeof kind, RegExp> = {
+    idle: /idle/i,
+    move: /run|walk/i,
+    attack: /attack|shoot/i,
+    death: /death|dead/i,
+  }
+  return clips.find((c) => pats[kind].test(c.name)) ?? null
 }
 
 /** 그룹 내 모든 표준 머티리얼 수집 — 피격 플래시·윈드업 발광 제어용 */

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, ENEMY_TYPES, type EnemyType } from './config'
 import { events } from './events'
-import { instantiate, collectMats, flashMats } from './models'
+import { instantiate, collectMats, flashMats, getAnimations, findClip } from './models'
 import type { Player } from './player'
 import type { ProjectilePool } from './projectiles'
 import type { Directive, Modifier } from '../ai/schema'
@@ -53,6 +53,9 @@ export class Enemy {
   private scaleMul: number
   /** 스폰 팝 연출 (오버슛 스케일-인) */
   private spawnTimer = 0.32
+  private mixer: THREE.AnimationMixer | null = null
+  private clips: { idle: THREE.AnimationClip | null; move: THREE.AnimationClip | null; attack: THREE.AnimationClip | null }
+  private curAction: THREE.AnimationAction | null = null
   /** L2 디렉티브가 조정하는 공격성 (1~5) */
   aggression = 3
 
@@ -73,6 +76,18 @@ export class Enemy {
       this.body = model
       this.blades = model.getObjectByName('blades') ?? null
       this.mats = collectMats(model)
+      // 애니메이션 믹서 — 이동/공격/대기 클립 재생
+      const anims = getAnimations(type)
+      if (anims.length) {
+        this.mixer = new THREE.AnimationMixer(model)
+        this.clips = {
+          idle: findClip(anims, 'idle'),
+          move: findClip(anims, 'move'),
+          attack: findClip(anims, 'attack'),
+        }
+      } else {
+        this.clips = { idle: null, move: null, attack: null }
+      }
     } else {
       // 모델 로드 실패 폴백 — 기본 도형
       const geo =
@@ -92,6 +107,7 @@ export class Enemy {
       mesh.castShadow = true
       this.body = mesh
       this.mats = [mesh.material as THREE.MeshStandardMaterial]
+      this.clips = { idle: null, move: null, attack: null }
     }
     this.baseIntensities = this.mats.map((m) => m.emissiveIntensity)
     this.body.position.y = 0.9
@@ -172,9 +188,20 @@ export class Enemy {
     }
   }
 
+  /** 애니메이션 클립 전환 (크로스페이드) */
+  private playClip(clip: THREE.AnimationClip | null): void {
+    if (!this.mixer || !clip) return
+    const next = this.mixer.clipAction(clip)
+    if (next === this.curAction) return
+    next.reset().fadeIn(0.2).play()
+    this.curAction?.fadeOut(0.2)
+    this.curAction = next
+  }
+
   update(dt: number, player: Player, projectiles: ProjectilePool): void {
     if (this.dead) return
     this.time += dt
+    this.mixer?.update(dt)
     const spec = ENEMY_TYPES[this.type]
     this.attackCooldown = Math.max(0, this.attackCooldown - dt)
 
@@ -315,13 +342,14 @@ export class Enemy {
       const back = 1 + (c1 + 1) * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
       this.root.scale.setScalar(this.scaleMul * Math.max(0.01, back))
     }
-    if (this.type === 'drone') {
-      // 드론은 공격적 파편 — 본체 회전 + 블레이드 고속 회전
-      this.body.rotation.y += dt * (this.phase === 'windup' ? 6 : 1.5)
-      if (this.blades) this.blades.rotation.y += dt * 9
-    } else {
-      // 포탑·골렘은 플레이어를 바라봄
-      this.body.rotation.y = Math.atan2(-this.facingDir.x, -this.facingDir.z) + Math.PI
+    // 모든 적은 플레이어를 바라봄 (스킨 애니가 다리·팔 움직임을 담당)
+    this.body.rotation.y = Math.atan2(-this.facingDir.x, -this.facingDir.z) + Math.PI
+    if (this.blades) this.blades.rotation.y += dt * 9 // 폴백 도형용
+
+    // 애니메이션 상태: 공격 단계=attack, 그 외=이동(move) → 없으면 idle
+    if (this.mixer) {
+      if (this.phase !== 'none') this.playClip(this.clips.attack ?? this.clips.move)
+      else this.playClip(this.clips.move ?? this.clips.idle)
     }
 
     if (this.shieldBadge) {
