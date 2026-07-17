@@ -31,7 +31,15 @@ export async function loadModels(): Promise<void> {
       try {
         const gltf = await loader.loadAsync(`${base}/${name}.glb`)
         gltf.scene.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) o.castShadow = true
+          const mesh = o as THREE.Mesh
+          if (!mesh.isMesh) return
+          mesh.castShadow = true
+          // 금속도 억제 + 거칠기 상향: 환경 반사가 약한 씬에서 금속 재질이 검게 죽는 것 방지
+          const mat = mesh.material as THREE.MeshStandardMaterial
+          if (mat?.isMeshStandardMaterial) {
+            mat.metalness = Math.min(mat.metalness, 0.15)
+            mat.roughness = Math.max(mat.roughness, 0.55)
+          }
         })
         registry.set(name, normalize(gltf.scene, NORMALIZE[name]))
       } catch (err) {

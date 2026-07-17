@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { ARENA_RADIUS } from './config'
 
 /** 씬·카메라·렌더러·아레나 지오메트리 — 게임 로직과 무관한 표시 계층 */
@@ -31,6 +32,10 @@ export class World {
     this.scene.background = new THREE.Color(0x07080c)
     this.scene.fog = new THREE.Fog(0x07080c, 40, 95)
 
+    // 환경맵 — 금속 재질(metalness)이 반사할 소스. 없으면 금속 모델이 새까맣게 렌더된다.
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+
     this.camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 200)
     this.camera.position.copy(this.camOffset)
     this.camera.lookAt(0, 0, 0)
@@ -43,6 +48,11 @@ export class World {
 
     this.buildLights()
     this.buildArena()
+
+    // 검증용: 렌더 런타임 토글 (norender로 고속 진행 → 순간 렌더 → 스크린샷)
+    ;(window as unknown as Record<string, unknown>).__setNoRender = (v: boolean) => {
+      this.noRender = v
+    }
 
     addEventListener('resize', () => {
       this.camera.aspect = innerWidth / innerHeight
