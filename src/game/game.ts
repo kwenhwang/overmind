@@ -16,6 +16,7 @@ import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
 import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL } from '../ai/director'
 import { Recorder } from './recorder'
+import { pickThree } from './upgrades'
 import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
 import { Hud } from '../ui/hud'
 
@@ -23,6 +24,7 @@ type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | '
 
 const _toEnemy = new THREE.Vector3()
 const _threat = new THREE.Vector3()
+const _up = new THREE.Vector3(0, 1, 0)
 
 /** 녹화 연기용 — 데스크톱에서도 모바일식 자동 조준·공격 */
 const AUTO_AIM = new URLSearchParams(location.search).has('autoaim')
@@ -51,6 +53,7 @@ export class Game {
   private telemetry = new Telemetry()
   private state: State = 'title'
   private easy = false
+  private upgradePending = false
   private rl: Recorder | null = null
   private tickFire = false
   private tickMelee = false
@@ -163,7 +166,9 @@ export class Game {
     this.boss = null
     this.bossDesign = null
     this.bossDeathTimer = -1
+    this.upgradePending = false
     this.hud.hideBossBar()
+    this.hud.hideUpgrades()
     this.world.setCoreVisible(true)
     if (this.player) this.world.scene.remove(this.player.mesh)
 
@@ -204,6 +209,16 @@ export class Game {
       this.pendingDesign = design
       this.hud.showCounter(design.counterReason)
     })
+
+    // 웨이브 1+ 클리어 후엔 업그레이드 3택 (성장 — 오버마인드 상승에 맞대응). 선택 전엔 다음 웨이브 대기.
+    if (this.wave >= 1) {
+      this.upgradePending = true
+      const choices = pickThree()
+      this.hud.showUpgrades(choices, (i) => {
+        choices[i].apply(this.player)
+        this.upgradePending = false
+      })
+    }
   }
 
   private startWave(): void {
@@ -213,6 +228,7 @@ export class Game {
     this.state = 'playing'
     this.hud.hideIntermission()
     this.hud.hideReport()
+    this.hud.hideUpgrades()
     this.hud.setWave(this.wave, TOTAL_WAVES)
     this.hud.showTaunt(design.taunt)
     sfx.taunt()
@@ -391,9 +407,9 @@ export class Game {
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
       const elapsed = WAVE_INTERMISSION_SEC - this.intermissionTimer
-      // LLM 설계가 도착했으면 최소 연출 시간(2.5초) 후 시작.
-      // 미도착이면 유예(-4초)까지 기다렸다가 폴백으로 시작 — "재구성 중" 연출이 지연을 흡수.
-      if ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -4) {
+      // 업그레이드 선택 대기 중이면 웨이브 시작 보류 (선택이 곧 진행 트리거).
+      // 선택 완료 후: LLM 설계 도착 시 최소 연출(2.5초) 후, 미도착이면 유예(-4초) 뒤 폴백 시작.
+      if (!this.upgradePending && ((this.pendingDesign && elapsed >= 2.5) || this.intermissionTimer <= -4)) {
         this.startWave()
       }
     } else if (this.state === 'bossIntro') {
@@ -501,9 +517,14 @@ export class Game {
       this.tickFire = true
       this.telemetry.recordRanged()
       sfx.shoot()
-      this.projectiles.spawn(
-        this.player.pos, this.player.facing, PLAYER.ranged.speed, PLAYER.ranged.damage, true,
-      )
+      // multishot: 조준 방향 중심으로 각도 분산 발사
+      const n = this.player.stats.multishot
+      const spread = 0.14
+      for (let i = 0; i < n; i++) {
+        const a = (i - (n - 1) / 2) * spread
+        _toEnemy.copy(this.player.facing).applyAxisAngle(_up, a)
+        this.projectiles.spawn(this.player.pos, _toEnemy, PLAYER.ranged.speed, this.player.stats.rangedDamage, true)
+      }
     }
 
     for (const e of this.enemies) e.update(dt, this.player, this.projectiles)
@@ -615,14 +636,14 @@ export class Game {
       const dist = _toEnemy.length()
       if (dist > PLAYER.melee.range + e.radius) continue
       _toEnemy.normalize()
-      const applied = e.takeDamage(PLAYER.melee.damage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos)
+      const applied = e.takeDamage(this.player.stats.meleeDamage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos)
       if (!applied) {
         this.effects.damageNumber(e.pos, '차단', 'blocked')
         sfx.enemyHit()
         continue
       }
       this.effects.burst(e.pos, 0xd9f99d, 5, 5)
-      this.effects.damageNumber(e.pos, String(PLAYER.melee.damage))
+      this.effects.damageNumber(e.pos, String(this.player.stats.meleeDamage))
       hitAny = true
       // thorns: 근접 반격 가시 — 근접 의존을 처벌
       if (e.has('thorns') && !this.player.isDashing) {
@@ -631,9 +652,9 @@ export class Game {
       }
     }
     if (this.boss && !this.boss.dead && this.boss.pos.distanceTo(this.player.pos) <= PLAYER.melee.range + BOSS.radius) {
-      if (this.boss.takeDamage(PLAYER.melee.damage)) {
+      if (this.boss.takeDamage(this.player.stats.meleeDamage)) {
         this.effects.burst(this.boss.pos, 0xffb86b, 6, 6)
-        this.effects.damageNumber(this.boss.pos, String(PLAYER.melee.damage))
+        this.effects.damageNumber(this.boss.pos, String(this.player.stats.meleeDamage))
         hitAny = true
       } else {
         this.effects.damageNumber(this.boss.pos, '무적', 'blocked')

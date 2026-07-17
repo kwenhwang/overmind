@@ -136,6 +136,27 @@ export class Hud {
     this.report.classList.add('hidden')
   }
 
+  /** 업그레이드 3택 카드 표시 — 선택 시 onPick(index) 후 자동 숨김 */
+  showUpgrades(choices: { name: string; desc: string }[], onPick: (i: number) => void): void {
+    const el = document.getElementById('upgrades') as HTMLDivElement
+    el.innerHTML =
+      '<div class="upg-hint">강화 선택 — 오버마인드에 맞서 진화하라</div>' +
+      choices
+        .map((c, i) => `<div class="upg-card" data-i="${i}"><div class="upg-name">${escapeHtml(c.name)}</div><div class="upg-desc">${escapeHtml(c.desc)}</div></div>`)
+        .join('')
+    el.classList.remove('hidden')
+    el.querySelectorAll<HTMLElement>('.upg-card').forEach((card) => {
+      card.onclick = () => {
+        el.classList.add('hidden')
+        onPick(Number(card.dataset.i))
+      }
+    })
+  }
+
+  hideUpgrades(): void {
+    document.getElementById('upgrades')?.classList.add('hidden')
+  }
+
   showScreen(title: string, desc: string, button: string, onClick: () => void): void {
     this.screenTitle.textContent = title
     this.screenDesc.textContent = desc

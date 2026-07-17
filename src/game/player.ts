@@ -6,10 +6,34 @@ import { instantiate, collectMats, flashMats } from './models'
 const _move = new THREE.Vector3()
 const _aim = new THREE.Vector3()
 
+/** 런타임 강화 가능한 플레이어 스탯 (업그레이드 선택이 수정) */
+export interface PlayerStats {
+  speed: number
+  maxHp: number
+  dashCooldown: number
+  rangedCooldown: number
+  rangedDamage: number
+  meleeDamage: number
+  multishot: number
+}
+
+export function defaultStats(): PlayerStats {
+  return {
+    speed: PLAYER.speed,
+    maxHp: PLAYER.hp,
+    dashCooldown: PLAYER.dashCooldown,
+    rangedCooldown: PLAYER.ranged.cooldown,
+    rangedDamage: PLAYER.ranged.damage,
+    meleeDamage: PLAYER.melee.damage,
+    multishot: 1,
+  }
+}
+
 export class Player {
   mesh: THREE.Group
   pos = new THREE.Vector3(0, 0, 6)
   facing = new THREE.Vector3(0, 0, -1)
+  stats: PlayerStats = defaultStats()
   hp: number = PLAYER.hp
   /** 해저드(감속 지대 등)가 조정하는 이동 배율 — Game이 매 프레임 설정 */
   speedMul = 1
@@ -70,7 +94,7 @@ export class Player {
     if (!nearestDir) return
     this.facing.copy(nearestDir)
     if (this.rangedCooldown <= 0) {
-      this.rangedCooldown = PLAYER.ranged.cooldown
+      this.rangedCooldown = this.stats.rangedCooldown
       this.wantsRanged = true
     }
   }
@@ -81,6 +105,11 @@ export class Player {
     this.meleeCooldown = PLAYER.melee.cooldown
     this.wantsMelee = true
     return true
+  }
+
+  /** 체력 회복 (업그레이드용). 최대 체력 상한 */
+  heal(amount: number): void {
+    this.hp = Math.min(this.stats.maxHp, this.hp + amount)
   }
 
   update(dt: number, input: Input): void {
@@ -98,11 +127,11 @@ export class Player {
     } else {
       if (input.dashPressed && this.dashCooldown <= 0 && move.lengthSq() > 0) {
         this.dashTimer = PLAYER.dashDuration
-        this.dashCooldown = PLAYER.dashCooldown
+        this.dashCooldown = this.stats.dashCooldown
         this.dashDir.copy(move)
         this.onDash?.(this.dashDir)
       }
-      this.pos.addScaledVector(move, PLAYER.speed * this.speedMul * dt)
+      this.pos.addScaledVector(move, this.stats.speed * this.speedMul * dt)
     }
 
     // 아레나 경계
@@ -120,7 +149,7 @@ export class Player {
 
     // 사격은 수동(좌클릭/K). 근접은 game이 밀착 시 자동 발동(requestMelee).
     if ((input.rangedHeld || input.rangedKeyHeld) && this.rangedCooldown <= 0) {
-      this.rangedCooldown = PLAYER.ranged.cooldown
+      this.rangedCooldown = this.stats.rangedCooldown
       this.wantsRanged = true
     }
 
