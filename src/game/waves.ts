@@ -28,10 +28,17 @@ export function planWaveSpawns(
   return flat.map(({ type, modifiers }, i) => {
     const t = flat.length > 1 ? i / (flat.length - 1) : 0.5
     const angle = baseAngle + (t - 0.5) * spread + (Math.random() - 0.5) * 0.2
-    const dist = ARENA_RADIUS * (0.55 + Math.random() * 0.35)
-    const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist)
-    // 플레이어 바로 위 스폰 방지
-    if (pos.distanceTo(playerPos) < 5) pos.multiplyScalar(-0.8)
+    // 플레이어 기준 상대 링(9~13)에 스폰 → 카메라 시야 안에 확실히 들어옴.
+    // (기존: 아레나 절대좌표라 플레이어 반대편 적이 화면 밖으로 사라졌음)
+    const dist = 9 + Math.random() * 4
+    const pos = new THREE.Vector3(
+      playerPos.x + Math.cos(angle) * dist,
+      0,
+      playerPos.z + Math.sin(angle) * dist,
+    )
+    // 아레나 경계 안으로 클램프
+    const r = pos.length()
+    if (r > ARENA_RADIUS - 1.5) pos.multiplyScalar((ARENA_RADIUS - 1.5) / r)
     return { type, pos, modifiers }
   })
 }

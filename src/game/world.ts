@@ -126,19 +126,8 @@ export class World {
     const grid = new THREE.PolarGridHelper(ARENA_RADIUS, 16, 6, 96, 0x1b2030, 0x161a26)
     grid.position.y = 0.02
     this.scene.add(grid)
-
-    // 중앙 코어 — 오버마인드의 존재감 (장식, 충돌 없음)
-    const core = new THREE.Mesh(
-      new THREE.OctahedronGeometry(1.1),
-      new THREE.MeshStandardMaterial({
-        color: 0x1a0b0b,
-        emissive: 0xff5f2e,
-        emissiveIntensity: 1.6,
-      }),
-    )
-    core.position.y = 4.2
-    core.name = 'overmind-core'
-    this.scene.add(core)
+    // (중앙 부유 코어 제거 — 정체 불명 장식이라 혼란. 오버마인드 존재감은 조롱 대사·리포트·
+    //  아레나 링 색(mood)으로 전달하고, 보스는 상공에서 독립 강림한다.)
   }
 
   /** 플레이어를 부드럽게 추적하는 카메라 + 환경 애니메이션 */
@@ -148,28 +137,17 @@ export class World {
     this.camera.position.copy(this.camTarget).add(this.camOffset)
     this.camera.lookAt(this.camTarget.x, 0, this.camTarget.z)
 
-    const core = this.scene.getObjectByName('overmind-core')
-    if (core) {
-      core.rotation.y += dt * 0.8
-      core.rotation.x = Math.sin(this.time * 0.7) * 0.3
-      core.position.y = 4.2 + Math.sin(this.time * 1.3) * 0.25
-    }
     const ringMat = this.ring.material as THREE.MeshStandardMaterial
     ringMat.emissiveIntensity = 3.4 + Math.sin(this.time * 2.1) * 0.7
   }
 
-  /** 보스전에서 중앙 장식 코어를 숨김 — 그 코어가 '내려와서' 보스가 된다는 연출 일관성 */
-  setCoreVisible(visible: boolean): void {
-    const core = this.scene.getObjectByName('overmind-core')
-    if (core) core.visible = visible
-  }
+  /** (보스 강림은 독립 처리 — 코어 제거로 no-op 유지, 호출부 호환용) */
+  setCoreVisible(_visible: boolean): void {}
 
-  /** 오버마인드의 감정 상태 → 중앙 코어 색 (confident 주황 / angry 적 / playful 시안 / desperate 보라) */
+  /** 오버마인드의 감정 상태 → 아레나 링 색 (confident 시안 / angry 적 / playful 초록 / desperate 보라) */
   setMood(mood: 'confident' | 'angry' | 'playful' | 'desperate'): void {
-    const core = this.scene.getObjectByName('overmind-core') as THREE.Mesh | undefined
-    if (!core) return
-    const colors = { confident: 0xff5f2e, angry: 0xdc2626, playful: 0x22d3ee, desperate: 0xa855f7 }
-    ;(core.material as THREE.MeshStandardMaterial).emissive.setHex(colors[mood])
+    const colors = { confident: 0x22d3ee, angry: 0xdc2626, playful: 0x4ade80, desperate: 0xa855f7 }
+    ;(this.ring.material as THREE.MeshStandardMaterial).emissive.setHex(colors[mood])
   }
 
   /** 초반 실측 fps가 낮으면 Game이 호출 — 블룸 없이 기본 렌더로 전환 */
