@@ -70,7 +70,19 @@ export class Game {
     if (diagBtn) {
       diagBtn.onclick = async () => {
         diagBtn.textContent = '전송 중…'
-        const ok = await uploadDiag(this.world.captureDiag())
+        const cap = this.world.captureDiag()
+        // 이 순간의 게임 상태(적 수·화면 내 적·좌표) 동봉 → 렌더 실패 vs 타이밍 구분
+        cap.info.game = {
+          state: this.state,
+          enemies: this.enemies.length,
+          onScreen: this.enemies.filter((e) => {
+            const v = e.pos.clone().project(this.world.camera)
+            return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
+          }).length,
+          boss: !!this.boss,
+          nearest: this.enemies[0] ? Math.round(this.enemies[0].pos.distanceTo(this.player.pos)) : -1,
+        }
+        const ok = await uploadDiag(cap)
         diagBtn.textContent = ok ? '전송됨 ✓' : '전송 실패'
         diagBtn.classList.toggle('sent', ok)
         setTimeout(() => (diagBtn.textContent = '진단 전송'), 3000)
