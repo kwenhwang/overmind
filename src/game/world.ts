@@ -11,6 +11,7 @@ export class World {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   private composer: EffectComposer
+  private baseOffset = new THREE.Vector3(0, 19, 11)
   private camOffset = new THREE.Vector3(0, 19, 11)
   private camTarget = new THREE.Vector3()
   private ring!: THREE.Mesh
@@ -59,12 +60,23 @@ export class World {
       this.noRender = v
     }
 
-    addEventListener('resize', () => {
-      this.camera.aspect = innerWidth / innerHeight
-      this.camera.updateProjectionMatrix()
-      this.renderer.setSize(innerWidth, innerHeight)
-      this.composer.setSize(innerWidth, innerHeight)
-    })
+    addEventListener('resize', () => this.applyViewport())
+    this.applyViewport()
+  }
+
+  /**
+   * 종횡비 대응 — 세로가 납작한 창(예: 1518x466)에서 카메라 세로 시야가 좁아
+   * 적이 위아래로 잘려 안 보이던 문제 해결. 납작할수록 카메라를 뒤로 물려 세로 확보.
+   */
+  private applyViewport(): void {
+    const aspect = innerWidth / innerHeight
+    this.camera.aspect = aspect
+    this.camera.updateProjectionMatrix()
+    this.renderer.setSize(innerWidth, innerHeight)
+    this.composer.setSize(innerWidth, innerHeight)
+    // 기준 16:9보다 납작하면(가로로 길면) 거리 스케일 ↑ (상한 2.4배)
+    const scale = Math.min(2.4, Math.max(1, aspect / 1.78))
+    this.camOffset.copy(this.baseOffset).multiplyScalar(scale)
   }
 
   private buildLights(): void {
