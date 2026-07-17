@@ -84,6 +84,10 @@ export class Game {
         const v = e.pos.clone().project(this.world.camera)
         return { x: Math.round(((v.x + 1) / 2) * innerWidth), y: Math.round(((1 - v.y) / 2) * innerHeight) }
       })(),
+      onScreen: this.enemies.filter((e) => {
+        const v = e.pos.clone().project(this.world.camera)
+        return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
+      }).length,
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)

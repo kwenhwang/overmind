@@ -30,7 +30,7 @@ export function planWaveSpawns(
     const angle = baseAngle + (t - 0.5) * spread + (Math.random() - 0.5) * 0.2
     // 플레이어 기준 상대 링(9~13)에 스폰 → 카메라 시야 안에 확실히 들어옴.
     // (기존: 아레나 절대좌표라 플레이어 반대편 적이 화면 밖으로 사라졌음)
-    const dist = 9 + Math.random() * 4
+    const dist = 7 + Math.random() * 3.5
     const pos = new THREE.Vector3(
       playerPos.x + Math.cos(angle) * dist,
       0,

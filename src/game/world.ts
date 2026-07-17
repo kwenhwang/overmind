@@ -10,7 +10,7 @@ export class World {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   private composer: EffectComposer
-  private camOffset = new THREE.Vector3(0, 24, 13.5)
+  private camOffset = new THREE.Vector3(0, 19, 11)
   private camTarget = new THREE.Vector3()
   private ring!: THREE.Mesh
   private time = 0

@@ -11,11 +11,11 @@ const registry = new Map<ModelName, THREE.Group>()
  * 게임 코드는 원점=시각 중심, 정면 -Z 를 가정하므로 그에 맞춘다.
  */
 const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
-  player: { size: 2.3, faceY: 0 }, // 전투기 노즈가 -Z(진행/조준 방향) 향하게 (PI는 앞뒤 반대였음)
-  drone: { size: 1.7, faceY: 0 },
-  spitter: { size: 2.0, faceY: 0 },
-  brute: { size: 2.9, faceY: 0 },
-  boss: { size: 5.6, faceY: 0 },
+  player: { size: 2.8, faceY: 0 }, // 전투기 노즈가 -Z(진행/조준 방향) 향하게 (PI는 앞뒤 반대였음)
+  drone: { size: 2.2, faceY: 0 },
+  spitter: { size: 2.5, faceY: 0 },
+  brute: { size: 3.5, faceY: 0 },
+  boss: { size: 6.5, faceY: 0 },
 }
 
 /**
