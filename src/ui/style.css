@@ -100,12 +100,13 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 }
 
 #diag-btn {
-  position: absolute; right: 16px; bottom: 16px; pointer-events: auto; cursor: pointer;
-  padding: 7px 12px; font-size: 12px; color: #7dd3fc;
-  background: rgba(8,12,18,.8); border: 1px solid #1e3a4a; border-radius: 6px;
+  position: absolute; right: 16px; top: 16px; pointer-events: auto; cursor: pointer;
+  padding: 12px 18px; font-size: 15px; color: #7dd3fc; touch-action: manipulation;
+  background: rgba(8,12,18,.85); border: 1px solid #1e3a4a; border-radius: 8px; z-index: 5;
 }
 #diag-btn:hover { background: rgba(20,30,42,.9); }
 #diag-btn.sent { color: #4ade80; border-color: #2f6b45; }
+@media (max-width: 720px) { #diag-btn { padding: 14px 20px; font-size: 16px; } }
 
 #joy-base {
   position: absolute; width: 128px; height: 128px; border-radius: 50%;
