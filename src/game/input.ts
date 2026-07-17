@@ -28,12 +28,13 @@ export class Input {
     addEventListener('mousemove', (e) => {
       this.mouseNdc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
     })
+    // 슈터 관습: 좌클릭 = 원거리 주력(연사), 우클릭 = 근접(고위험 고보상)
     addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.meleePressed = true
-      if (e.button === 2) this.rangedHeld = true
+      if (e.button === 0) this.rangedHeld = true
+      if (e.button === 2) this.meleePressed = true
     })
     addEventListener('mouseup', (e) => {
-      if (e.button === 2) this.rangedHeld = false
+      if (e.button === 0) this.rangedHeld = false
     })
     addEventListener('contextmenu', (e) => e.preventDefault())
     addEventListener('blur', () => this.keys.clear())

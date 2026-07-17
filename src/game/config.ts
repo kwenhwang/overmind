@@ -7,7 +7,7 @@ export const PLAYER = {
   dashSpeed: 26,
   dashDuration: 0.18,
   dashCooldown: 0.9,
-  melee: { damage: 34, range: 2.4, arcDeg: 130, cooldown: 0.38 },
+  melee: { damage: 34, range: 3.2, arcDeg: 140, cooldown: 0.38 },
   ranged: { damage: 12, speed: 30, cooldown: 0.22, projectileRadius: 0.18 },
 } as const
 

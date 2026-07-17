@@ -76,6 +76,14 @@ export class Game {
       hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
       boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
       dodge: this.telemetry.debugDodge(),
+      nearest: this.enemies.length ? Math.round(this.findNearestEnemy()?.pos.distanceTo(this.player.pos) ?? -1) : -1,
+      proj: this.projectiles.list.length,
+      nearestScreen: (() => {
+        const e = this.findNearestEnemy()
+        if (!e) return null
+        const v = e.pos.clone().project(this.world.camera)
+        return { x: Math.round(((v.x + 1) / 2) * innerWidth), y: Math.round(((1 - v.y) / 2) * innerHeight) }
+      })(),
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
@@ -87,7 +95,7 @@ export class Game {
         'OVERMIND',
         IS_TOUCH
           ? '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
-          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n같은 패턴을 반복하면 반드시 처벌당한다.\n\nWASD 이동 · Space 대시(무적) · 좌클릭 근접 · 우클릭 원거리',
+          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n[ 마우스로 조준 · 좌클릭 = 사격 ]\nWASD 이동 · Space 대시(무적) · 우클릭 = 근접(강력)',
         'START',
         () => this.startRun(),
       )

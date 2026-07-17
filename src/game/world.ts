@@ -10,12 +10,13 @@ export class World {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   private composer: EffectComposer
-  private camOffset = new THREE.Vector3(0, 18, 10.5)
+  private camOffset = new THREE.Vector3(0, 24, 13.5)
   private camTarget = new THREE.Vector3()
   private ring!: THREE.Mesh
   private time = 0
   /** 저사양(소프트웨어 GL 등)에서 블룸은 fps를 죽임 — 자동/수동으로 끔 */
   private useBloom = !new URLSearchParams(location.search).has('nobloom')
+  private noRender = new URLSearchParams(location.search).has('norender')
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -177,6 +178,8 @@ export class World {
   }
 
   render(): void {
+    // ?norender — 헤드리스 로직 검증용 (소프트웨어 GL 렌더 병목 회피)
+    if (this.noRender) return
     if (this.useBloom) this.composer.render()
     else this.renderer.render(this.scene, this.camera)
   }
