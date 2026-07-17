@@ -46,6 +46,45 @@ export async function uploadDiag(payload: { img: string; info: unknown }): Promi
   return false
 }
 
+export interface ScoreEntry {
+  name: string
+  score: number
+  wave: number
+  at: number
+}
+
+/** 점수 제출 → 순위 반환 */
+export async function submitScore(name: string, score: number, wave: number): Promise<number | null> {
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/score`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, score, wave }),
+        signal: AbortSignal.timeout(6000),
+      })
+      if (!res.ok) continue
+      return ((await res.json()) as { rank?: number }).rank ?? null
+    } catch {
+      /* 다음 */
+    }
+  }
+  return null
+}
+
+/** 리더보드 조회 (상위) */
+export async function fetchLeaderboard(): Promise<ScoreEntry[]> {
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetch(`${base}/leaderboard`, { signal: AbortSignal.timeout(6000) })
+      if (res.ok) return (await res.json()) as ScoreEntry[]
+    } catch {
+      /* 다음 */
+    }
+  }
+  return []
+}
+
 /** 게임플레이 로그(RL 데이터셋) 업로드 — ?rl 에피소드 종료 시 */
 export async function uploadRL(episode: object): Promise<boolean> {
   for (const base of ENDPOINTS) {

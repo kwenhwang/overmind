@@ -149,6 +149,29 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 }
 #screen h1 { font-size: 44px; letter-spacing: .3em; }
 #screen p { color: #9ca0b8; max-width: 560px; text-align: center; line-height: 1.7; white-space: pre-line; }
+#board-wrap {
+  width: min(420px, 86vw); background: rgba(8, 12, 18, .7);
+  border: 1px solid #1e3a4a; border-radius: 10px; padding: 14px 18px; margin: 4px 0;
+}
+#board-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; color: #9ca0b8; }
+#board-name-row input {
+  flex: 1; padding: 7px 10px; font-size: 14px; color: #e8e8ec;
+  background: rgba(0,0,0,.3); border: 1px solid #2f6b45; border-radius: 5px;
+}
+#board-name-row button {
+  pointer-events: auto; cursor: pointer; padding: 7px 14px; font-size: 13px; letter-spacing: 0;
+  color: #0a0b0f; background: #4ade80; border: 0; border-radius: 5px; margin: 0;
+}
+#board-list { list-style: none; counter-reset: rank; max-height: 240px; overflow-y: auto; }
+#board-list li {
+  counter-increment: rank; display: flex; justify-content: space-between; gap: 10px;
+  padding: 5px 4px; font-size: 14px; color: #cbd5e1; border-bottom: 1px solid rgba(255,255,255,.05);
+  font-variant-numeric: tabular-nums;
+}
+#board-list li::before { content: counter(rank); width: 24px; color: #7dd3fc; text-align: right; }
+#board-list li .bn { flex: 1; text-align: left; padding-left: 10px; }
+#board-list li.me { color: #4ade80; font-weight: 700; }
+
 #easy-label {
   display: flex; align-items: center; gap: 8px; pointer-events: auto; cursor: pointer;
   font-size: 15px; color: #9ca0b8; user-select: none;

@@ -14,7 +14,7 @@ import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
 import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL } from '../ai/director'
+import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL, submitScore, fetchLeaderboard } from '../ai/director'
 import { Recorder } from './recorder'
 import { pickThree } from './upgrades'
 import type { BossDesign, BossPhase, WaveDesign } from '../ai/schema'
@@ -54,6 +54,7 @@ export class Game {
   private state: State = 'title'
   private easy = false
   private upgradePending = false
+  private scoreSubmitted = false
   private rl: Recorder | null = null
   private tickFire = false
   private tickMelee = false
@@ -167,8 +168,10 @@ export class Game {
     this.bossDesign = null
     this.bossDeathTimer = -1
     this.upgradePending = false
+    this.scoreSubmitted = false
     this.hud.hideBossBar()
     this.hud.hideUpgrades()
+    this.hud.hideLeaderboard()
     this.world.setCoreVisible(true)
     if (this.player) this.world.scene.remove(this.player.mesh)
 
@@ -742,5 +745,25 @@ export class Game {
       'RETRY',
       () => this.startRun(),
     )
+    void this.submitAndShowBoard()
+  }
+
+  /** 리더보드 제출·표시 — 저장된 이름이 있으면 자동 제출, 없으면 등록 버튼으로 */
+  private async submitAndShowBoard(): Promise<void> {
+    const name = localStorage.getItem('overmind-name') ?? ''
+    if (name && !this.scoreSubmitted) {
+      this.scoreSubmitted = true
+      await submitScore(name, this.score, this.wave)
+    }
+    const board = await fetchLeaderboard()
+    this.hud.showLeaderboard(board, this.score, name, async (newName) => {
+      localStorage.setItem('overmind-name', newName)
+      if (!this.scoreSubmitted) {
+        this.scoreSubmitted = true
+        await submitScore(newName, this.score, this.wave)
+      }
+      const updated = await fetchLeaderboard()
+      this.hud.showLeaderboard(updated, this.score, newName, () => {})
+    })
   }
 }

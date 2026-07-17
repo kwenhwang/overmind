@@ -157,6 +157,41 @@ export class Hud {
     document.getElementById('upgrades')?.classList.add('hidden')
   }
 
+  /**
+   * 게임오버/승리 화면에 리더보드 표시 + 이름 등록.
+   * onSubmit(name)은 '등록' 클릭 시 호출(점수 제출 후 갱신된 board로 다시 render).
+   */
+  showLeaderboard(
+    board: { name: string; score: number; wave: number }[],
+    myScore: number,
+    savedName: string,
+    onSubmit: (name: string) => void,
+  ): void {
+    const wrap = document.getElementById('board-wrap') as HTMLDivElement
+    const list = document.getElementById('board-list') as HTMLOListElement
+    const nameInput = document.getElementById('name-input') as HTMLInputElement
+    const saveBtn = document.getElementById('name-save') as HTMLButtonElement
+    wrap.classList.remove('hidden')
+    nameInput.value = savedName
+    let myMarked = false
+    list.innerHTML = board
+      .slice(0, 10)
+      .map((e) => {
+        const mine = !myMarked && e.score === myScore && e.name === savedName
+        if (mine) myMarked = true
+        return `<li class="${mine ? 'me' : ''}"><span class="bn">${escapeHtml(e.name)}</span><span>${e.score.toLocaleString()}</span></li>`
+      })
+      .join('')
+    saveBtn.onclick = () => {
+      const n = nameInput.value.trim().slice(0, 12) || '플레이어'
+      onSubmit(n)
+    }
+  }
+
+  hideLeaderboard(): void {
+    document.getElementById('board-wrap')?.classList.add('hidden')
+  }
+
   showScreen(title: string, desc: string, button: string, onClick: () => void): void {
     this.screenTitle.textContent = title
     this.screenDesc.textContent = desc

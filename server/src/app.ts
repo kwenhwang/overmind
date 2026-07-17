@@ -100,6 +100,34 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
   })
 
+  // 전역 리더보드 — 점수 제출/조회 (KV 'leaderboard', 상위 50 유지)
+  app.post('/score', async (c) => {
+    const env = getEnv(c)
+    if (!env.DIAG) return c.json({ ok: false })
+    const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number } | null
+    if (!body || typeof body.score !== 'number' || body.score < 0 || body.score > 1e7) {
+      return c.json({ ok: false, reason: 'bad_score' }, 400)
+    }
+    const entry = {
+      name: String(body.name ?? '익명').slice(0, 12).replace(/[<>&]/g, ''),
+      score: Math.floor(body.score),
+      wave: Math.max(0, Math.min(6, Math.floor(body.wave ?? 0))),
+      at: Date.now(),
+    }
+    const raw = await env.DIAG.get('leaderboard')
+    const board = raw ? (JSON.parse(raw) as (typeof entry)[]) : []
+    board.push(entry)
+    board.sort((a, b) => b.score - a.score)
+    const top = board.slice(0, 50)
+    await env.DIAG.put('leaderboard', JSON.stringify(top))
+    return c.json({ ok: true, rank: top.findIndex((e) => e === entry) + 1, total: board.length })
+  })
+  app.get('/leaderboard', async (c) => {
+    const env = getEnv(c)
+    const raw = env.DIAG ? await env.DIAG.get('leaderboard') : null
+    return c.json(raw ? JSON.parse(raw) : [])
+  })
+
   // 게임 시작 시 1회 — 단기 서명 토큰 발급 (봇 진입 장벽)
   app.get('/session', async (c) => {
     const env = getEnv(c)
