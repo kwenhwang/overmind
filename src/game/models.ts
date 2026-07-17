@@ -25,6 +25,35 @@ const ENEMY_TINT: Partial<Record<ModelName, number>> = {
   boss: 0xb01010, // 암적 — 보스
 }
 
+/** 유닛별 림라이트(프레넬 외곽 발광) 색 — 어두운 아레나에서 실루엣을 띄우고 가시성을 확보.
+ *  정체성 색의 밝은 버전. 셰이더 내부 계산이라 emissive 맵의 ANGLE 문제와 무관. */
+const RIM_COLOR: Record<ModelName, number> = {
+  player: 0xff6ab0, // 핑크
+  drone: 0xff5a3a, // 빨강
+  spitter: 0xffe14d, // 노랑
+  brute: 0xffa040, // 주황
+  boss: 0xff2f2f, // 적
+}
+
+/**
+ * 프레넬 림라이트를 표준 머티리얼에 주입 (onBeforeCompile). 시야각에 스치는 외곽이
+ * rimColor로 발광 → 로우폴리 실루엣이 살고 어두운 배경에서 확실히 분리된다.
+ */
+function addRim(mat: THREE.MeshStandardMaterial, hex: number): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = { value: new THREE.Color(hex) }
+    shader.fragmentShader =
+      'uniform vec3 uRimColor;\n' +
+      shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `float _rim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 4.5);
+         outgoingLight += uRimColor * _rim * 0.35;
+         #include <opaque_fragment>`,
+      )
+  }
+  mat.needsUpdate = true
+}
+
 const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
   player: { size: 2.8, faceY: 0 }, // 전투기 노즈가 -Z(진행/조준 방향) 향하게 (PI는 앞뒤 반대였음)
   drone: { size: 2.2, faceY: 0 },
@@ -61,6 +90,15 @@ export async function loadModels(): Promise<void> {
               mat.color.getHSL(hsl)
               if (hsl.s > 0.25) mat.color.setHex(tint)
             }
+            // 플레이어 모델은 밝은 텍스처맵이 강한 조명 아래 하얗게 떠 정체성이 사라짐.
+            // 맵을 제거하고 플랫 핑크로 → 확실한 정체성 + 로우폴리 플랫셰이딩 룩.
+            if (name === 'player') {
+              mat.map = null
+              mat.color.setHex(0xf03a9b)
+              mat.roughness = 0.5
+            }
+            // 프레넬 림라이트 — 외곽 발광으로 실루엣·가시성 강화
+            addRim(mat, RIM_COLOR[name])
           }
         })
         registry.set(name, { scene: normalize(gltf.scene, NORMALIZE[name]), animations: gltf.animations })

@@ -40,7 +40,7 @@ export class Effects {
     for (let i = 0; i < count; i++) {
       const mesh = new THREE.Mesh(
         particleGeo,
-        new THREE.MeshBasicMaterial({ color, transparent: true }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending }),
       )
       mesh.position.copy(pos).setY(0.9)
       const angle = Math.random() * Math.PI * 2
@@ -73,6 +73,17 @@ export class Effects {
     mesh.position.copy(pos).setY(0.9)
     this.scene.add(mesh)
     this.particles.push({ mesh, vel: new THREE.Vector3(), life: 0.22, maxLife: 0.44, still: true })
+  }
+
+  /** 총구 섬광 — 사격 순간 짧고 밝은 발광 (가산, 작게 — 플레이어 위라 크면 washout) */
+  muzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3, color = 0xfff1a8): void {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 8, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }),
+    )
+    mesh.position.copy(pos).addScaledVector(dir, 1.0).setY(0.9)
+    this.scene.add(mesh)
+    this.particles.push({ mesh, vel: new THREE.Vector3(), life: 0.07, maxLife: 0.14, still: true })
   }
 
   /** 근접 휘두름 — 전방 부채꼴 잔상 */

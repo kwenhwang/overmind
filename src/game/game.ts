@@ -190,6 +190,7 @@ export class Game {
     this.player.onDash = (dir) => {
       this.telemetry.recordDash(dir)
       sfx.dash()
+      this.world.ripple(this.player.pos) // 대시 파동 — 바닥이 반응
       // mirror_dash 모디파이어: 오버마인드가 회피 자체에 반응한다
       for (const e of this.enemies) e.mirrorDash(dir)
     }
@@ -605,6 +606,7 @@ export class Game {
     sfx.enemyDie()
     this.effects.burst(e.pos, e.color, 14, 8)
     this.effects.shake(0.25)
+    this.world.ripple(e.pos) // 처치 파동
 
     // split_on_death: 소형 드론 2기로 분열
     if (e.has('split_on_death')) {
