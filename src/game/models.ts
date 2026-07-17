@@ -38,9 +38,9 @@ export async function loadModels(): Promise<void> {
           if (mat?.isMeshStandardMaterial) {
             mat.metalness = Math.min(mat.metalness, 0.15)
             mat.roughness = Math.max(mat.roughness, 0.55)
-            // 자체발광 부여: 조명·환경맵이 약한 기기에서도 형체가 확실히 보이게.
-            // (실측: 조명 의존 몸통은 일부 GPU에서 어둡게 죽고 emissive 눈만 보였음)
-            if (mat.emissive.getHex() === 0x000000) {
+            // 적에게만 자체발광 부여: 조명·환경맵 약한 기기에서도 형체가 확실히 보이게.
+            // 플레이어(전투기)는 원래 재질 유지 — emissive 주면 하얗게 워시아웃돼 멋이 죽음.
+            if (name !== 'player' && mat.emissive.getHex() === 0x000000) {
               mat.emissive.copy(mat.color)
               mat.emissiveIntensity = 0.5
             }
