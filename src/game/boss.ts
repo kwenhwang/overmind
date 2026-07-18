@@ -335,8 +335,12 @@ export class Boss {
             ? (this.clips.move ?? this.clips.idle)
             : this.clips.idle
       this.playClip(clip)
+    } else if (this.core === this.ring) {
+      // 통짜 임포트 모델(Tripo 보스 코어): 팽이 X → 위압적 느린 Y회전 + 부유 바운스만
+      this.root.position.copy(this.pos).setY(BOSS.hoverY + Math.sin(this.time * 1.6) * 0.35)
+      this.core.rotation.set(0, this.core.rotation.y + dt * (this.chargeState === 'windup' ? 5 : 0.5), 0)
     } else {
-      // 기하학 폴백 코어: 절차적 회전
+      // 기하학 폴백 코어(코어+링+파편 분리): 절차적 다중 회전
       this.root.position.copy(this.pos).setY(BOSS.hoverY + Math.sin(this.time * 1.6) * 0.3)
       this.core.rotation.y += dt * (this.chargeState === 'windup' ? 8 : 1.2)
       this.core.rotation.x = Math.sin(this.time * 0.8) * 0.4

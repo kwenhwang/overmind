@@ -75,7 +75,7 @@ export const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
   drone: { size: 2.2, faceY: 0 },
   spitter: { size: 2.5, faceY: 0 },
   brute: { size: 3.5, faceY: 0 },
-  boss: { size: 6.5, faceY: 0 },
+  boss: { size: 5.6, faceY: 0 }, // Tripo 보스 코어 (상단 잘림 완화)
 }
 
 /**
