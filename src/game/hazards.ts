@@ -55,7 +55,7 @@ export class Hazard {
       this.tickAccum += dt
       if (this.tickAccum >= 0.5) {
         this.tickAccum -= 0.5
-        player.takeDamage(Math.round(SPIKE_DPS * 0.5))
+        player.takeDamage(Math.round(SPIKE_DPS * 0.5), "가시지대")
       }
       return 1
     }

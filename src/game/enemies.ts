@@ -314,7 +314,7 @@ export class Enemy {
     } else {
       // brute: 예고 후 아직 근접해 있으면 강타
       this.phase = 'none'
-      if (dist <= ENEMY_TYPES.brute.attackRange * 1.25) player.takeDamage(ENEMY_TYPES.brute.damage)
+      if (dist <= ENEMY_TYPES.brute.attackRange * 1.25) player.takeDamage(ENEMY_TYPES.brute.damage, "브루트 강타")
     }
   }
 
@@ -324,7 +324,7 @@ export class Enemy {
     // 돌진 중 접촉 시에만 피해 (1회)
     if (!this.lungeHit && this.pos.distanceTo(player.pos) < this.radius + 0.7) {
       this.lungeHit = true
-      player.takeDamage(spec.damage)
+      player.takeDamage(spec.damage, "드론 돌진")
     }
     if (this.phaseTimer <= 0) this.phase = 'none'
   }

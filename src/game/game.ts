@@ -102,6 +102,9 @@ export class Game {
           }).length,
           boss: !!this.boss,
           nearest: this.enemies[0] ? Math.round(this.enemies[0].pos.distanceTo(this.player.pos)) : -1,
+          hp: this.player.hp,
+          wave: this.wave,
+          damage: this.player.damageBySource, // 피해 출처별 누적 — 개발자 분석용
         }
         const ok = await uploadDiag(cap)
         diagBtn.textContent = ok ? '전송됨 ✓' : '전송 실패'
@@ -503,7 +506,14 @@ export class Game {
       this.rl?.addReward(-0.1 * taken)
       sfx.playerHurt()
       this.effects.shake(0.55)
-      this.effects.damageNumber(this.player.pos, `-${Math.round(taken)}`, 'player')
+      // 데미지 숫자에 출처 표기 + 화면 붉은 플래시 → "뭐에 맞았는지" 즉시 인지
+      this.effects.damageNumber(this.player.pos, `-${Math.round(taken)} ${this.player.lastHitSource}`, 'player')
+      const hf = document.getElementById('hit-flash')
+      if (hf) {
+        hf.classList.remove('on')
+        void hf.offsetWidth
+        hf.classList.add('on')
+      }
     }
 
     // RL 로깅 — 이번 틱 (관측·행동·보상). 전투 중에만 (?rl 모드)
@@ -648,7 +658,7 @@ export class Game {
     if (e.has('explode_on_death')) {
       this.effects.burst(e.pos, 0xf97316, 22, 11)
       this.effects.shake(0.5)
-      if (e.pos.distanceTo(this.player.pos) < 4.2) this.player.takeDamage(24)
+      if (e.pos.distanceTo(this.player.pos) < 4.2) this.player.takeDamage(24, "자폭")
     }
     this.combo++
     this.comboTimer = 3
@@ -703,7 +713,7 @@ export class Game {
       hitAny = true
       // thorns: 근접 반격 가시 — 근접 의존을 처벌
       if (e.has('thorns') && !this.player.isDashing) {
-        this.player.takeDamage(9)
+        this.player.takeDamage(9, "가시 반격")
         this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
       }
     }
@@ -764,7 +774,7 @@ export class Game {
       } else {
         const hitDist = p.radius + PLAYER.radius
         if (p.pos.distanceToSquared(this.player.pos) < hitDist * hitDist) {
-          this.player.takeDamage(p.damage)
+          this.player.takeDamage(p.damage, "스피터 탄")
           p.dead = true
         }
       }
@@ -792,9 +802,16 @@ export class Game {
       : this.bossDesign
         ? `"${this.bossDesign.winLine}"`
         : '"예측대로였다." — 오버마인드는 너의 패턴을 학습했다.'
+    // 피해 내역 — "왜 깍였는지" 한눈에 (가장 많이 당한 순)
+    const dmg = Object.entries(this.player.damageBySource)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([src, n]) => `${src} ${Math.round(n)}`)
+      .join(' · ')
+    const dmgLine = dmg ? `\n\n피해: ${dmg}` : ''
     this.hud.showScreen(
       victory ? 'OVERMIND 정지' : 'OVERMIND 승리',
-      `${line}\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}`,
+      `${line}\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}${dmgLine}`,
       'RETRY',
       () => this.startRun(),
     )

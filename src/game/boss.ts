@@ -230,7 +230,7 @@ export class Boss {
     this.contactCooldown = Math.max(0, this.contactCooldown - dt)
     if (dist < BOSS.radius + 0.7 && !player.isDashing && this.contactCooldown <= 0) {
       this.contactCooldown = 0.6
-      player.takeDamage(BOSS.contactDamage)
+      player.takeDamage(BOSS.contactDamage, "보스 접촉")
     }
 
     if (this.attackCooldown <= 0) this.beginAttack(player, projectiles)
@@ -296,7 +296,7 @@ export class Boss {
     }
     if (!this.chargeHit && this.pos.distanceTo(player.pos) < BOSS.radius + 0.8) {
       this.chargeHit = true
-      player.takeDamage(BOSS.charge.damage)
+      player.takeDamage(BOSS.charge.damage, "보스 돌진")
     }
     if (this.chargeTimer <= 0) {
       this.chargeState = 'none'
@@ -312,7 +312,7 @@ export class Boss {
       s.ring.scale.setScalar(1 + Math.max(0, s.timer / BOSS.targetedSlam.warnSec) * 0.2)
       if (s.timer <= 0) {
         if (s.pos.distanceTo(player.pos) < BOSS.targetedSlam.radius) {
-          player.takeDamage(BOSS.targetedSlam.damage)
+          player.takeDamage(BOSS.targetedSlam.damage, "보스 강타")
         }
         this.effects.burst(s.pos, 0xef4444, 16, 9)
         this.effects.shake(0.4)

@@ -159,9 +159,16 @@ export class Player {
     if (this.hurtFlash > 0) this.hurtFlash -= dt
   }
 
-  takeDamage(amount: number): void {
+  /** 피해 출처별 누적 (죽을 때 '왜 깍였는지' 표시 + 진단 분석용) */
+  damageBySource: Record<string, number> = {}
+  /** 직전 피해 출처 (방향 히트 표시용) */
+  lastHitSource = ''
+
+  takeDamage(amount: number, source = '기타'): void {
     if (this.isDashing) return // 대시 중 무적
     this.hp = Math.max(0, this.hp - amount)
+    this.damageBySource[source] = (this.damageBySource[source] ?? 0) + amount
+    this.lastHitSource = source
     if (this.hurtFlash <= 0) {
       this.hurtFlash = 0.15
       flashMats(this.mats)
