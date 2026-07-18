@@ -197,3 +197,9 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   color: #0a0b0f; background: #e8e8ec; border: 0; border-radius: 4px;
 }
 #screen button:hover { background: #ffb86b; }
+
+#ver {
+  position: fixed; right: 6px; bottom: 4px; z-index: 20; pointer-events: none;
+  font-size: 11px; font-variant-numeric: tabular-nums; color: rgba(125,211,252,.55);
+  letter-spacing: .04em;
+}

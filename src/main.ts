@@ -1,6 +1,13 @@
 import { Game } from './game/game'
 import { loadModels } from './game/models'
 import { initSession } from './ai/director'
+import { GAME_VERSION } from './game/config'
+
+// 화면 버전 표시 — 캐시(옛 빌드) 여부 즉시 진단용. 우하단 작게.
+const ver = document.createElement('div')
+ver.id = 'ver'
+ver.textContent = `${GAME_VERSION} · ${__BUILD__}`
+document.body.appendChild(ver)
 
 // 모델 선로드 + 세션 토큰 발급 (둘 다 실패해도 게임은 폴백으로 진행)
 await Promise.all([loadModels(), initSession()])

@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** 빌드 식별자 (vite define) — 화면 버전표시로 캐시 진단 */
+declare const __BUILD__: string
