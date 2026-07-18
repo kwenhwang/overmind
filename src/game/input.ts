@@ -54,8 +54,9 @@ export class Input {
     addEventListener(
       'touchstart',
       (e) => {
-        // 오버레이·버튼(START/RETRY/진단 등) 위 터치는 게임 입력으로 먹지 않음
-        if ((e.target as HTMLElement).closest('#screen, #diag-btn, button')) return
+        // 오버레이·버튼·업그레이드 카드·리더보드 위 터치는 게임 입력으로 먹지 않음
+        // (#upgrades 누락으로 모바일에서 업그레이드 선택 탭이 씹히던 버그 수정)
+        if ((e.target as HTMLElement).closest('#screen, #diag-btn, #upgrades, #board-wrap, button, label, input')) return
         for (const t of e.changedTouches) {
           if (t.clientX < innerWidth / 2 && this.joyId === null) {
             this.joyId = t.identifier

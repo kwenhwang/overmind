@@ -232,14 +232,26 @@ export class Game {
       this.requestDesign(digest)
     }
 
-    // 웨이브 1+ 클리어 후엔 업그레이드 3택 (성장 — 오버마인드 상승에 맞대응). 선택 전엔 다음 웨이브 대기.
-    if (this.wave >= 1) {
+    // 업그레이드 3택 — 매 웨이브는 잦아 스노우볼로 밸런스 붕괴 → '격 웨이브'(2·4)만.
+    // 성장 대결 구도는 유지하되 AI 카운터 챌린지가 트리비얼해지지 않게 절제.
+    if (this.wave >= 2 && this.wave % 2 === 0) {
       this.upgradePending = true
       const choices = pickThree()
-      this.hud.showUpgrades(choices, (i) => {
+      let picked = false
+      const pick = (i: number): void => {
+        if (picked) return
+        picked = true
         choices[i].apply(this.player)
         this.upgradePending = false
-      })
+      }
+      this.hud.showUpgrades(choices, pick)
+      // 안전장치: 선택 UI가 안 먹혀도(모바일 등) 게임이 인터미션에서 멈추지 않게 15초 후 자동선택
+      setTimeout(() => {
+        if (!picked) {
+          this.hud.hideUpgrades()
+          pick(0)
+        }
+      }, 15000)
     }
   }
 
