@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import {
-  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, SCORE, BOSS,
+  PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, SCORE, BOSS, GAME_VERSION,
 } from './config'
 import { Boss } from './boss'
 import { World } from './world'
@@ -156,8 +156,8 @@ export class Game {
       this.hud.showScreen(
         'OVERMIND',
         IS_TOUCH
-          ? '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
-          : '적 웨이브 5개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n이동 WASD·방향키 · 조준 마우스 · 사격 좌클릭\n대시(무적) Space 또는 우클릭 · 근접은 밀착 시 자동',
+          ? '적 웨이브 8개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
+          : '적 웨이브 8개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n이동 WASD·방향키 · 조준 마우스 · 사격 좌클릭\n대시(무적) Space 또는 우클릭 · 근접은 밀착 시 자동',
         'START',
         () => this.startRun(),
       )
@@ -291,7 +291,7 @@ export class Game {
     this.pendingSpawn = {
       plan,
       aggression: design.aggression,
-      hpMul: 1 + (this.wave - 1) * 0.12, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=1.84)
+      hpMul: 1 + (this.wave - 1) * 0.15, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=2.05)
       timer: SPAWN_TELEGRAPH_SEC,
       markers: createSpawnMarkers(plan, this.world.scene),
     }
@@ -305,7 +305,10 @@ export class Game {
   }
 
   private clearHazards(): void {
-    for (const h of this.hazardZones) this.world.scene.remove(h.mesh)
+    for (const h of this.hazardZones) {
+      this.world.scene.remove(h.mesh)
+      h.dispose()
+    }
     this.hazardZones = []
   }
 
@@ -443,7 +446,10 @@ export class Game {
     // 해저드 효과 (가시 피해·감속) — 이동 계산 전에 적용
     let speedMul = 1
     if (this.state === 'playing') {
-      for (const h of this.hazardZones) speedMul = Math.min(speedMul, h.update(combatDt, this.player))
+      for (const h of this.hazardZones) {
+        speedMul = Math.min(speedMul, h.update(combatDt, this.player))
+        h.updateLabel(this.world.camera)
+      }
     }
     this.player.speedMul = speedMul
 
@@ -796,16 +802,16 @@ export class Game {
     const name = localStorage.getItem('overmind-name') ?? ''
     if (name && !this.scoreSubmitted) {
       this.scoreSubmitted = true
-      await submitScore(name, this.score, this.wave)
+      await submitScore(name, this.score, this.wave, GAME_VERSION)
     }
-    const board = await fetchLeaderboard()
+    const board = await fetchLeaderboard(GAME_VERSION)
     this.hud.showLeaderboard(board, this.score, name, async (newName) => {
       localStorage.setItem('overmind-name', newName)
       if (!this.scoreSubmitted) {
         this.scoreSubmitted = true
-        await submitScore(newName, this.score, this.wave)
+        await submitScore(newName, this.score, this.wave, GAME_VERSION)
       }
-      const updated = await fetchLeaderboard()
+      const updated = await fetchLeaderboard(GAME_VERSION)
       this.hud.showLeaderboard(updated, this.score, newName, () => {})
     })
   }

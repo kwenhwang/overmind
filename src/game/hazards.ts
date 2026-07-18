@@ -13,6 +13,8 @@ const SPIKE_DPS = 9
 export class Hazard {
   mesh: THREE.Mesh
   private tickAccum = 0
+  /** 이게 뭔지 알려주는 라벨 (빨강 가시 / 파랑 감속) — 심사자·플레이어 혼란 방지 */
+  private label: HTMLDivElement
 
   constructor(
     public spec: HazardSpec,
@@ -20,6 +22,11 @@ export class Hazard {
     scene: THREE.Scene,
   ) {
     const spike = spec.type === 'spike_zone'
+    this.label = document.createElement('div')
+    this.label.className = 'hazard-label'
+    this.label.textContent = spike ? '⚠ 가시지대 (피해)' : '❄ 감속지대'
+    this.label.style.color = spike ? '#fca5a5' : '#7dd3fc'
+    ;(document.getElementById('hud') ?? document.body).appendChild(this.label)
     this.mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(HAZARD_RADIUS, HAZARD_RADIUS, 0.1, 40),
       new THREE.MeshStandardMaterial({
@@ -53,6 +60,23 @@ export class Hazard {
       return 1
     }
     return 0.55 // slow_field
+  }
+
+  /** 라벨을 해저드 중심 위에 투영 (게임이 매 프레임 카메라와 함께 호출) */
+  updateLabel(camera: THREE.Camera): void {
+    const v = this.pos.clone().setY(0.8).project(camera)
+    if (v.z > 1 || v.x < -1.2 || v.x > 1.2) {
+      this.label.style.display = 'none'
+      return
+    }
+    this.label.style.display = 'block'
+    this.label.style.left = `${((v.x + 1) / 2) * innerWidth}px`
+    this.label.style.top = `${((1 - v.y) / 2) * innerHeight}px`
+  }
+
+  /** 라벨 DOM 제거 (웨이브 종료 시) */
+  dispose(): void {
+    this.label.remove()
   }
 }
 

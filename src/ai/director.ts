@@ -55,14 +55,14 @@ export interface ScoreEntry {
   at: number
 }
 
-/** 점수 제출 → 순위 반환 */
-export async function submitScore(name: string, score: number, wave: number): Promise<number | null> {
+/** 점수 제출 → 순위 반환. version별로 리더보드 분리(밸런스 변경 시 점수 비교 공정성) */
+export async function submitScore(name: string, score: number, wave: number, version: string): Promise<number | null> {
   for (const base of ENDPOINTS) {
     try {
       const res = await fetch(`${base}/score`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, score, wave }),
+        body: JSON.stringify({ name, score, wave, version }),
         signal: AbortSignal.timeout(6000),
       })
       if (!res.ok) continue
@@ -74,11 +74,11 @@ export async function submitScore(name: string, score: number, wave: number): Pr
   return null
 }
 
-/** 리더보드 조회 (상위) */
-export async function fetchLeaderboard(): Promise<ScoreEntry[]> {
+/** 리더보드 조회 (해당 version 상위) */
+export async function fetchLeaderboard(version: string): Promise<ScoreEntry[]> {
   for (const base of ENDPOINTS) {
     try {
-      const res = await fetch(`${base}/leaderboard`, { signal: AbortSignal.timeout(6000) })
+      const res = await fetch(`${base}/leaderboard?v=${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(6000) })
       if (res.ok) return (await res.json()) as ScoreEntry[]
     } catch {
       /* 다음 */
@@ -216,7 +216,7 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
  */
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
   // 난이도 커브: 초반 완만(심사자 진입장벽↓) → 후반 밀도↑. 모바일 성능 위해 상한 12.
-  const maxEnemies = Math.min(2 + Math.ceil(wave * 1.5), 12) // W1=4 W3=7 W5=10 W8=12
+  const maxEnemies = Math.min(3 + Math.ceil(wave * 1.5), 12) // W1=5 W3=8 W5=11 W8=12
   const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
   const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
 
@@ -330,7 +330,7 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
     taunt: TAUNT_POOL[wave % TAUNT_POOL.length],
     profileUpdate: '', // 폴백은 기억을 갱신하지 않음 (기존 프로파일 유지)
     mood: digest.playerHpPct < 35 ? 'confident' : 'angry',
-    aggression: Math.min(5, 2 + Math.floor(wave / 2)) as WaveDesign['aggression'],
+    aggression: Math.min(5, 3 + Math.floor(wave / 2)) as WaveDesign['aggression'], // 공격성 상향
   }
   // 폴백도 LLM 경로와 동일하게 sanitize(적 수·모디파이어 상한) → 인과 보장 레이어를 거친다.
   // (sanitize 누락으로 폴백만 후반 웨이브 상한을 넘던 것 수정 — 모바일 성능·일관성)

@@ -121,27 +121,31 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   app.post('/score', async (c) => {
     const env = getEnv(c)
     if (!env.DIAG) return c.json({ ok: false })
-    const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number } | null
+    const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number; version?: string } | null
     if (!body || typeof body.score !== 'number' || body.score < 0 || body.score > 1e7) {
       return c.json({ ok: false, reason: 'bad_score' }, 400)
     }
+    // 밸런스 버전별 리더보드 분리 — 난이도가 바뀌면 점수 비교가 불공정하므로 키를 버전으로 나눔
+    const version = (String(body.version ?? 'v0').replace(/[^a-z0-9._-]/gi, '').slice(0, 16)) || 'v0'
     const entry = {
       name: String(body.name ?? '익명').slice(0, 12).replace(/[<>&]/g, ''),
       score: Math.floor(body.score),
-      wave: Math.max(0, Math.min(6, Math.floor(body.wave ?? 0))),
+      wave: Math.max(0, Math.min(9, Math.floor(body.wave ?? 0))),
       at: Date.now(),
     }
-    const raw = await env.DIAG.get('leaderboard')
+    const key = `leaderboard:${version}`
+    const raw = await env.DIAG.get(key)
     const board = raw ? (JSON.parse(raw) as (typeof entry)[]) : []
     board.push(entry)
     board.sort((a, b) => b.score - a.score)
     const top = board.slice(0, 50)
-    await env.DIAG.put('leaderboard', JSON.stringify(top))
+    await env.DIAG.put(key, JSON.stringify(top))
     return c.json({ ok: true, rank: top.findIndex((e) => e === entry) + 1, total: board.length })
   })
   app.get('/leaderboard', async (c) => {
     const env = getEnv(c)
-    const raw = env.DIAG ? await env.DIAG.get('leaderboard') : null
+    const version = (String(c.req.query('v') ?? 'v0').replace(/[^a-z0-9._-]/gi, '').slice(0, 16)) || 'v0'
+    const raw = env.DIAG ? await env.DIAG.get(`leaderboard:${version}`) : null
     return c.json(raw ? JSON.parse(raw) : [])
   })
 
