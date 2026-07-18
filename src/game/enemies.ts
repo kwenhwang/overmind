@@ -41,6 +41,8 @@ export class Enemy {
   private action: ActionName = 'chase'
   private thinkTimer = 0
   private strafeSign = Math.random() < 0.5 ? -1 : 1
+  /** 포위 방향 부호 — 접근 시 좌/우로 갈라져 여러 방향에서 에워쌈 (몰이사냥 방지) */
+  private flankSign = Math.random() < 0.5 ? -1 : 1
   private knockback = new THREE.Vector3()
   private phase: AttackPhase = 'none'
   private phaseTimer = 0
@@ -240,9 +242,17 @@ export class Enemy {
 
     _steer.set(0, 0, 0)
     switch (this.action) {
-      case 'chase':
-        _steer.copy(_toPlayer)
+      case 'chase': {
+        // 도주 예측 차단 — 플레이어 이동을 앞질러 겨냥 (거리유지+몰이사냥 무력화)
+        _steer.copy(player.pos).addScaledVector(player.moveDir, 2.6).sub(this.pos).setY(0)
+        if (_steer.lengthSq() > 0.0001) _steer.normalize()
+        // 멀 때는 접근 방향에 접선 성분(고유 부호)을 더해 여러 방향에서 포위 → 한 덩어리로 안 몰림
+        if (dist > 4) {
+          _side.set(-_steer.z, 0, _steer.x).multiplyScalar(this.flankSign)
+          _steer.addScaledVector(_side, 0.7).normalize()
+        }
         break
+      }
       case 'strafe':
         _side.set(-_toPlayer.z, 0, _toPlayer.x).multiplyScalar(this.strafeSign)
         _steer.copy(_side).addScaledVector(_toPlayer, 0.25)
@@ -258,9 +268,9 @@ export class Enemy {
     }
 
     if (_steer.lengthSq() > 0) {
-      // enrage_far: 플레이어가 거리를 벌리면 가속 (카이팅 처벌)
-      const enraged = this.has('enrage_far') && dist > 6.5
-      this.pos.addScaledVector(_steer.normalize(), spec.speed * (enraged ? 2.1 : 1) * dt)
+      // 카이팅 처벌: 멀면 기본 가속(모디파이어 없어도), enrage_far면 더 강하게
+      const mult = this.has('enrage_far') && dist > 6.5 ? 2.2 : dist > 8 ? 1.45 : 1
+      this.pos.addScaledVector(_steer.normalize(), spec.speed * mult * dt)
     }
     this.applyDisplay(dt)
   }

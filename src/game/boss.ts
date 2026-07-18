@@ -216,10 +216,14 @@ export class Boss {
       return
     }
 
-    // 평시: 플레이어와 중거리 유지하며 이동
-    const preferred = 8
-    _dir.copy(_toPlayer).multiplyScalar(dist > preferred ? 1 : -0.6)
-    this.pos.addScaledVector(_dir, BOSS.speed * dt)
+    // 평시: 플레이어를 압박(가깝게 붙고 도주를 앞질러 겨냥 — 카이팅 방지)
+    const preferred = 5
+    // 플레이어 이동을 예측해 앞질러 이동 + 멀면 가속(카이팅 처벌)
+    _dir.copy(player.pos).addScaledVector(player.moveDir, 3).sub(this.pos).setY(0)
+    if (_dir.lengthSq() > 0.0001) _dir.normalize()
+    if (dist <= preferred) _dir.multiplyScalar(-0.5) // 너무 붙으면 살짝 물러나 공간
+    const chaseSpeed = BOSS.speed * (dist > 9 ? 2.4 : 1.6) // 기본 압박 + 카이팅 시 가속
+    this.pos.addScaledVector(_dir, chaseSpeed * dt)
     const r = this.pos.length()
     const maxR = ARENA_RADIUS - BOSS.radius
     if (r > maxR) this.pos.multiplyScalar(maxR / r)

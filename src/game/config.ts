@@ -36,7 +36,7 @@ export type EnemyType = keyof typeof ENEMY_TYPES
 export const WAVE_INTERMISSION_SEC = 3.5
 export const TOTAL_WAVES = 11 // 5→8: 플레이타임 + AI 관찰→카운터 사이클(핵심 가치) 확장
 /** 밸런스/난이도 버전 — 리더보드를 버전별로 분리(밸런스 바뀌면 점수 비교 불공정) */
-export const GAME_VERSION = 'v7'
+export const GAME_VERSION = 'v8'
 /** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
 export const SPAWN_TELEGRAPH_SEC = 0.9
 
