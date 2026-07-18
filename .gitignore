@@ -10,3 +10,4 @@ assets/blender/*.blend1
 # wrangler 로컬 dev 상태 (miniflare) — 추적 금지
 server/.wrangler/
 .wrangler/
+tools/_*.mjs
