@@ -122,8 +122,8 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 @media (max-width: 720px) { #diag-btn { padding: 14px 20px; font-size: 16px; } }
 
 #upgrades {
-  position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%);
-  display: flex; gap: 14px; pointer-events: auto; z-index: 4;
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; gap: 14px; pointer-events: auto; z-index: 6;
 }
 .upg-card {
   width: 160px; padding: 16px 14px; cursor: pointer; text-align: center;
@@ -133,7 +133,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 .upg-card:hover { transform: translateY(-6px); border-color: #4ade80; background: rgba(16, 26, 20, .95); }
 .upg-card .upg-name { font-size: 16px; font-weight: 700; color: #4ade80; margin-bottom: 6px; }
 .upg-card .upg-desc { font-size: 13px; color: #cbd5e1; line-height: 1.5; }
-.upg-hint { position: absolute; left: 50%; bottom: calc(12% + 130px); transform: translateX(-50%); color: #7dd3fc; font-size: 14px; letter-spacing: .1em; }
+.upg-hint { position: absolute; left: 50%; top: calc(50% - 105px); transform: translateX(-50%); color: #7dd3fc; font-size: 15px; font-weight: 700; letter-spacing: .1em; text-shadow: 0 0 12px rgba(56,189,248,.5); }
 @media (max-width: 720px) { .upg-card { width: 120px; padding: 14px 10px; } #upgrades { gap: 8px; } }
 
 #joy-base {
