@@ -215,7 +215,8 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
  * (설계 의도는 유지하되 강도만 웨이브에 맞게 조인다.)
  */
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
-  const maxEnemies = Math.min(3 + wave, 9) // W1=4 … W5=8 (완화 — 봇 보스도달 0% 대응)
+  // 난이도 커브: 초반 완만(심사자 진입장벽↓) → 후반 밀도↑. 모바일 성능 위해 상한 12.
+  const maxEnemies = Math.min(2 + Math.ceil(wave * 1.5), 12) // W1=4 W3=7 W5=10 W8=12
   const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
   const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
 
@@ -331,8 +332,9 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
     mood: digest.playerHpPct < 35 ? 'confident' : 'angry',
     aggression: Math.min(5, 2 + Math.floor(wave / 2)) as WaveDesign['aggression'],
   }
-  // 폴백도 동일한 인과 보장 레이어를 거친다 (LLM 유무와 무관하게 습관 카운터 일관)
-  return enforceDominantCounter(base, digest)
+  // 폴백도 LLM 경로와 동일하게 sanitize(적 수·모디파이어 상한) → 인과 보장 레이어를 거친다.
+  // (sanitize 누락으로 폴백만 후반 웨이브 상한을 넘던 것 수정 — 모바일 성능·일관성)
+  return enforceDominantCounter(sanitize(base, wave), digest)
 }
 
 const TAUNT_POOL = [

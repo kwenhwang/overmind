@@ -43,10 +43,10 @@ export function planWaveSpawns(
   })
 }
 
-/** 웨이브 실행기 2단계 — 계획된 좌표에 실제 스폰 */
-export function spawnEnemies(plan: SpawnPlan[], aggression: number, scene: THREE.Scene): Enemy[] {
+/** 웨이브 실행기 2단계 — 계획된 좌표에 실제 스폰. hpMul로 후반 웨이브 적을 단단하게. */
+export function spawnEnemies(plan: SpawnPlan[], aggression: number, scene: THREE.Scene, hpMul = 1): Enemy[] {
   return plan.map(({ type, pos, modifiers }) => {
-    const enemy = new Enemy(type, pos, scene, modifiers)
+    const enemy = new Enemy(type, pos, scene, modifiers, { hpMul })
     enemy.aggression = aggression
     return enemy
   })

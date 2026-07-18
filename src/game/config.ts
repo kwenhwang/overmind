@@ -34,7 +34,7 @@ export const ENEMY_TYPES = {
 export type EnemyType = keyof typeof ENEMY_TYPES
 
 export const WAVE_INTERMISSION_SEC = 3.5
-export const TOTAL_WAVES = 5
+export const TOTAL_WAVES = 8 // 5→8: 플레이타임 + AI 관찰→카운터 사이클(핵심 가치) 확장
 /** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
 export const SPAWN_TELEGRAPH_SEC = 0.9
 
@@ -42,7 +42,7 @@ export const SCORE = { drone: 100, spitter: 150, brute: 300, waveClear: 500, bos
 
 export const BOSS = {
   radius: 1.8,
-  hp: 550,
+  hp: 750, // 550→750: 최종전 길이·중량감↑
   hoverY: 2.2,
   speed: 2.4,
   contactDamage: 14,

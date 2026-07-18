@@ -37,6 +37,7 @@ function easyMode(): boolean {
 interface PendingSpawn {
   plan: SpawnPlan[]
   aggression: number
+  hpMul: number
   timer: number
   markers: THREE.Mesh[]
 }
@@ -290,6 +291,7 @@ export class Game {
     this.pendingSpawn = {
       plan,
       aggression: design.aggression,
+      hpMul: 1 + (this.wave - 1) * 0.12, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=1.84)
       timer: SPAWN_TELEGRAPH_SEC,
       markers: createSpawnMarkers(plan, this.world.scene),
     }
@@ -526,9 +528,9 @@ export class Game {
       m.rotation.z += dt * 3
     }
     if (this.pendingSpawn.timer <= 0) {
-      const { plan, aggression } = this.pendingSpawn
+      const { plan, aggression, hpMul } = this.pendingSpawn
       this.clearPendingSpawn()
-      this.enemies = spawnEnemies(plan, aggression, this.world.scene)
+      this.enemies = spawnEnemies(plan, aggression, this.world.scene, hpMul)
       this.waveEnemyCount = this.enemies.length
       for (const e of this.enemies) this.effects.burst(e.pos, e.color, 4, 4)
       sfx.waveStart()
