@@ -3,10 +3,10 @@ export const ARENA_RADIUS = 22
 export const PLAYER = {
   radius: 0.55,
   speed: 9,
-  hp: 85, // 120→85: 한 대가 더 아프게 (난이도)
+  hp: 65, // 회피가 진짜 필요하게 (데이터: 아들 44% 남기고 클리어)
   dashSpeed: 26,
   dashDuration: 0.18,
-  dashCooldown: 0.7,
+  dashCooldown: 1.0, // 0.7→1.0: 모든 공격을 대시로 못 피하게
   melee: { damage: 34, range: 3.2, arcDeg: 140, cooldown: 0.38 },
   ranged: { damage: 12, speed: 30, cooldown: 0.22, projectileRadius: 0.18 },
 } as const
@@ -21,8 +21,8 @@ export const ENEMY_TYPES = {
   // 원거리 견제형 — 거리 유지 후 투사체
   spitter: {
     radius: 0.55, speed: 4.2, hp: 22, damage: 11,
-    attackRange: 12, preferredRange: 9, attackCooldown: 1.5,
-    projectileSpeed: 13, color: 0xb46bd9,
+    attackRange: 12, preferredRange: 9, attackCooldown: 1.1,
+    projectileSpeed: 20, color: 0xb46bd9,
   },
   // 저속 고체력 탱커 — 플레이어를 구석으로 모는 압박용
   brute: {
@@ -36,7 +36,7 @@ export type EnemyType = keyof typeof ENEMY_TYPES
 export const WAVE_INTERMISSION_SEC = 3.5
 export const TOTAL_WAVES = 8 // 5→8: 플레이타임 + AI 관찰→카운터 사이클(핵심 가치) 확장
 /** 밸런스/난이도 버전 — 리더보드를 버전별로 분리(밸런스 바뀌면 점수 비교 불공정) */
-export const GAME_VERSION = 'v5'
+export const GAME_VERSION = 'v6'
 /** 웨이브 스폰 예고(경고 링) 시간 — 스폰이 '의도된 배치'로 읽히게 함 */
 export const SPAWN_TELEGRAPH_SEC = 0.9
 

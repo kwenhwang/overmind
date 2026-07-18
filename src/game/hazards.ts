@@ -3,7 +3,7 @@ import { ARENA_RADIUS } from './config'
 import type { HazardSpec } from '../ai/schema'
 import type { Player } from './player'
 
-const HAZARD_RADIUS = 4.2
+const HAZARD_RADIUS = 5.2
 const SPIKE_DPS = 22
 
 /**
