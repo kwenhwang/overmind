@@ -77,6 +77,8 @@ export class Game {
   private score = 0
   private combo = 0
   private comboTimer = 0
+  /** 난이도별 점수 배율 — 쉬운 조작(자동 조준·사격)은 0.5배 + 리더보드도 분리 */
+  private scoreMul = 1
   // 녹화 모드는 실시간 fps가 무의미 — 프로브 생략(블룸 유지)
   private fpsProbe = { frames: 0, start: 0, done: new URLSearchParams(location.search).has('record') }
 
@@ -166,6 +168,7 @@ export class Game {
 
   private startRun(): void {
     this.easy = easyMode() // 타이틀 토글 반영
+    this.scoreMul = this.easy ? 0.5 : 1
     this.rl = RL_MODE ? new Recorder() : null
     for (const e of this.enemies) this.world.scene.remove(e.root)
     this.enemies = []
@@ -416,7 +419,7 @@ export class Game {
       this.boss.dispose()
       this.boss = null
       this.hud.hideBossBar()
-      this.score += SCORE.boss
+      this.score += Math.round(SCORE.boss * this.scoreMul)
       this.hud.setScore(this.score, this.combo)
       this.endRun(true)
     }
@@ -611,7 +614,7 @@ export class Game {
     }
 
     if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
-      this.score += SCORE.waveClear
+      this.score += Math.round(SCORE.waveClear * this.scoreMul)
       this.rl?.addReward(5)
       this.hud.setScore(this.score, this.combo)
       this.effects.hitstop(0.28) // 클리어 슬로모
@@ -649,7 +652,7 @@ export class Game {
     this.combo++
     this.comboTimer = 3
     const gained = SCORE[e.type] * this.combo
-    this.score += gained
+    this.score += Math.round(gained * this.scoreMul)
     this.effects.damageNumber(e.pos, `+${gained}`, 'score')
     this.hud.setScore(this.score, this.combo)
   }
@@ -802,16 +805,16 @@ export class Game {
     const name = localStorage.getItem('overmind-name') ?? ''
     if (name && !this.scoreSubmitted) {
       this.scoreSubmitted = true
-      await submitScore(name, this.score, this.wave, GAME_VERSION)
+      await submitScore(name, this.score, this.wave, GAME_VERSION + (this.easy ? "-easy" : ""))
     }
-    const board = await fetchLeaderboard(GAME_VERSION)
+    const board = await fetchLeaderboard(GAME_VERSION + (this.easy ? "-easy" : ""))
     this.hud.showLeaderboard(board, this.score, name, async (newName) => {
       localStorage.setItem('overmind-name', newName)
       if (!this.scoreSubmitted) {
         this.scoreSubmitted = true
-        await submitScore(newName, this.score, this.wave, GAME_VERSION)
+        await submitScore(newName, this.score, this.wave, GAME_VERSION + (this.easy ? "-easy" : ""))
       }
-      const updated = await fetchLeaderboard(GAME_VERSION)
+      const updated = await fetchLeaderboard(GAME_VERSION + (this.easy ? "-easy" : ""))
       this.hud.showLeaderboard(updated, this.score, newName, () => {})
     })
   }
