@@ -216,7 +216,7 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
  */
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
   // 난이도 커브: 초반 완만(심사자 진입장벽↓) → 후반 밀도↑. 모바일 성능 위해 상한 12.
-  const maxEnemies = Math.min(3 + Math.ceil(wave * 1.5), 12) // W1=5 W3=8 W5=11 W8=12
+  const maxEnemies = Math.min(3 + Math.ceil(wave * 1.7), 14) // W1=5 W3=8 W5=11 W8=12
   const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
   const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
 

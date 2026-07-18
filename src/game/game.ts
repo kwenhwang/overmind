@@ -298,7 +298,7 @@ export class Game {
     this.pendingSpawn = {
       plan,
       aggression: design.aggression,
-      hpMul: 1 + (this.wave - 1) * 0.15, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=2.05)
+      hpMul: 1 + (this.wave - 1) * 0.2, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=2.05)
       timer: SPAWN_TELEGRAPH_SEC,
       markers: createSpawnMarkers(plan, this.world.scene),
     }
@@ -809,6 +809,22 @@ export class Game {
       .map(([src, n]) => `${src} ${Math.round(n)}`)
       .join(' · ')
     const dmgLine = dmg ? `\n\n피해: ${dmg}` : ''
+    // 판 종료 시 요약 자동 전송 — 진단 버튼이 승리/게임오버 화면에 가려도 개발자가 실플레이 분석 가능
+    void uploadDiag({
+      img: '',
+      info: {
+        runSummary: {
+          outcome: victory ? 'victory' : 'died',
+          wave: this.wave,
+          score: this.score,
+          hpLeft: Math.round(this.player.hp),
+          mode: this.easy ? 'easy' : IS_TOUCH ? 'mobile' : 'desktop',
+          damage: this.player.damageBySource,
+          build: __BUILD__,
+          at: Date.now(),
+        },
+      },
+    })
     this.hud.showScreen(
       victory ? 'OVERMIND 정지' : 'OVERMIND 승리',
       `${line}\n\n점수 ${this.score.toLocaleString()} · 최고 기록 ${best.toLocaleString()}${dmgLine}`,
