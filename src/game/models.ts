@@ -71,7 +71,7 @@ export function configureMaterial(mat: THREE.MeshStandardMaterial, name: ModelNa
 }
 
 export const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
-  player: { size: 2.8, faceY: Math.PI / 2 }, // Tripo 전투기: 노즈가 +X → -Z(전방)로 90° 회전
+  player: { size: 2.8, faceY: -Math.PI / 2 }, // Tripo 전투기: player 회전(+π)과 합쳐 노즈가 -Z(전방) 향하게
   drone: { size: 2.2, faceY: 0 },
   spitter: { size: 2.5, faceY: 0 },
   brute: { size: 3.5, faceY: 0 },

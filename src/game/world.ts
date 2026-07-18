@@ -33,7 +33,11 @@ export class World {
    * 네온으로 살리는 프로 룩의 핵심. 블룸은 threshold 높게(밝은 것만) 튜닝해 적 모델이
    * 하얗게 타지 않게. 저사양 자동 비활성(disableBloom) + ?nobloom 탈출구.
    */
-  private usePost = !new URLSearchParams(location.search).has('nobloom')
+  // 후처리 기본 ON, 단 터치기기(모바일/태블릿)는 OFF — 선택적 블룸의 float 렌더타깃·
+  // 커스텀 셰이더가 모바일 GPU에서 깨지거나 이상하게 렌더되는 사례 대응(안전 우선).
+  private usePost =
+    !new URLSearchParams(location.search).has('nobloom') &&
+    !('ontouchstart' in window || navigator.maxTouchPoints > 0)
   private gradePass!: ShaderPass
   private noRender = new URLSearchParams(location.search).has('norender')
 
@@ -428,12 +432,28 @@ export class World {
     }
   }
 
-  /** 진단용 — 현재 화면 PNG dataURL + 렌더러/기기 정보 */
+  /** 진단 썸네일 — 고해상도 태블릿 캔버스가 20MB 상한을 넘겨 전송 실패하던 문제 대응.
+   *  최대 1280px 폭으로 축소 + JPEG로 항상 작게. */
+  private captureThumb(): string {
+    const src = this.renderer.domElement
+    const scale = Math.min(1, 1280 / src.width)
+    const w = Math.max(1, Math.round(src.width * scale))
+    const h = Math.max(1, Math.round(src.height * scale))
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d')
+    if (!ctx) return this.renderer.domElement.toDataURL('image/jpeg', 0.6)
+    ctx.drawImage(src, 0, 0, w, h)
+    return c.toDataURL('image/jpeg', 0.72)
+  }
+
+  /** 진단용 — 현재 화면(축소 JPEG) + 렌더러/기기 정보 */
   captureDiag(): { img: string; info: Record<string, unknown> } {
     const gl = this.renderer.getContext()
     const dbgExt = gl.getExtension('WEBGL_debug_renderer_info')
     return {
-      img: this.renderer.domElement.toDataURL('image/png'),
+      img: this.captureThumb(),
       info: {
         gpu: dbgExt ? gl.getParameter(dbgExt.UNMASKED_RENDERER_WEBGL) : 'unknown',
         glVersion: gl.getParameter(gl.VERSION),
