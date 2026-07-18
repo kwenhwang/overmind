@@ -7,5 +7,12 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false,
+    rollupOptions: {
+      // 멀티 페이지: 게임(index) + 에셋 뷰어(viewer)
+      input: {
+        main: 'index.html',
+        viewer: 'viewer.html',
+      },
+    },
   },
 })

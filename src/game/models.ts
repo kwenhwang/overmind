@@ -54,7 +54,28 @@ function addRim(mat: THREE.MeshStandardMaterial, hex: number): void {
   mat.needsUpdate = true
 }
 
-const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
+/**
+ * 게임과 업로드 뷰어가 공유하는 머티리얼 처리 — 로드 시·미리보기 시 동일한 룩 보장.
+ * (metalness/roughness 정규화 + 종류별 tint + 플레이어 플랫핑크 + 프레넬 림)
+ */
+export function configureMaterial(mat: THREE.MeshStandardMaterial, name: ModelName): void {
+  mat.metalness = Math.min(mat.metalness, 0.15)
+  mat.roughness = Math.max(mat.roughness, 0.55)
+  const tint = ENEMY_TINT[name]
+  if (tint) {
+    const hsl = { h: 0, s: 0, l: 0 }
+    mat.color.getHSL(hsl)
+    if (hsl.s > 0.25) mat.color.setHex(tint)
+  }
+  if (name === 'player') {
+    mat.map = null
+    mat.color.setHex(0xf03a9b)
+    mat.roughness = 0.5
+  }
+  addRim(mat, RIM_COLOR[name])
+}
+
+export const NORMALIZE: Record<ModelName, { size: number; faceY: number }> = {
   player: { size: 2.8, faceY: 0 }, // 전투기 노즈가 -Z(진행/조준 방향) 향하게 (PI는 앞뒤 반대였음)
   drone: { size: 2.2, faceY: 0 },
   spitter: { size: 2.5, faceY: 0 },
@@ -79,27 +100,8 @@ export async function loadModels(): Promise<void> {
           if (!mesh.isMesh) return
           mesh.castShadow = true
           const mat = mesh.material as THREE.MeshStandardMaterial
-          if (mat?.isMeshStandardMaterial) {
-            mat.metalness = Math.min(mat.metalness, 0.15)
-            mat.roughness = Math.max(mat.roughness, 0.55)
-            // (emissive 부여 안 함 — ANGLE/D3D11에서 렌더 깨짐. 가시성은 조명+환경맵으로.)
-            // 종류별 색 구분: 채도 높은(몸통) 머티리얼만 정체성 색으로 교체
-            const tint = ENEMY_TINT[name]
-            if (tint) {
-              const hsl = { h: 0, s: 0, l: 0 }
-              mat.color.getHSL(hsl)
-              if (hsl.s > 0.25) mat.color.setHex(tint)
-            }
-            // 플레이어 모델은 밝은 텍스처맵이 강한 조명 아래 하얗게 떠 정체성이 사라짐.
-            // 맵을 제거하고 플랫 핑크로 → 확실한 정체성 + 로우폴리 플랫셰이딩 룩.
-            if (name === 'player') {
-              mat.map = null
-              mat.color.setHex(0xf03a9b)
-              mat.roughness = 0.5
-            }
-            // 프레넬 림라이트 — 외곽 발광으로 실루엣·가시성 강화
-            addRim(mat, RIM_COLOR[name])
-          }
+          // (emissive 부여 안 함 — ANGLE/D3D11에서 렌더 깨짐. 가시성은 조명+환경맵+림으로.)
+          if (mat?.isMeshStandardMaterial) configureMaterial(mat, name)
         })
         registry.set(name, { scene: normalize(gltf.scene, NORMALIZE[name]), animations: gltf.animations })
       } catch (err) {

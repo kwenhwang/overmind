@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>OVERMIND — 에셋 뷰어</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #07080c; }
+    body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; color: #e8e8ec; }
+    #view { position: fixed; inset: 0; display: block; }
+    #bar {
+      position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 12px; align-items: center;
+      flex-wrap: wrap; padding: 10px 14px; background: rgba(8,12,18,.82); border-bottom: 1px solid #1e3a4a;
+      font-size: 13px; z-index: 5;
+    }
+    #bar label { color: #9ca0b8; display: flex; align-items: center; gap: 6px; }
+    #bar select, #bar input[type=file] { font-size: 13px; color: #e8e8ec; background: rgba(0,0,0,.3);
+      border: 1px solid #2f6b45; border-radius: 5px; padding: 5px 8px; }
+    #bar .title { font-weight: 700; letter-spacing: .15em; color: #22d3ee; margin-right: 8px; }
+    #drop {
+      position: fixed; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center;
+      pointer-events: none; color: #7dd3fc; font-size: 22px; letter-spacing: .1em;
+      background: rgba(6,10,16,.0); transition: background .12s;
+    }
+    #drop.hint { background: rgba(6,10,16,.6); outline: 3px dashed #22d3ee; outline-offset: -20px; }
+    #info {
+      position: fixed; left: 14px; bottom: 14px; z-index: 5; max-width: 420px;
+      background: rgba(8,12,18,.82); border: 1px solid #1e3a4a; border-radius: 8px; padding: 12px 14px;
+      font-size: 12.5px; line-height: 1.7; color: #a8c8d8; font-variant-numeric: tabular-nums;
+      white-space: pre-wrap;
+    }
+    #info b { color: #fff; }
+    #info .norm { color: #4ade80; }
+    #info .warn { color: #fbbf24; }
+    #info .err { color: #f87171; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="bar">
+    <span class="title">OVERMIND 에셋 뷰어</span>
+    <label>GLB <input type="file" id="file" accept=".glb,.gltf" /></label>
+    <label>슬롯 <select id="slot">
+      <option value="player">player (전투기)</option>
+      <option value="drone">drone (빨강 돌격)</option>
+      <option value="spitter">spitter (노랑 원거리)</option>
+      <option value="brute">brute (주황 탱커)</option>
+      <option value="boss">boss (보스)</option>
+    </select></label>
+    <label>애니 <select id="clip"><option value="-1">없음</option></select></label>
+    <label><input type="checkbox" id="spin" checked /> 자동회전</label>
+    <label><input type="checkbox" id="raw" /> 원본색(게임처리 끄기)</label>
+  </div>
+  <div id="drop">여기로 GLB 파일을 끌어다 놓으세요</div>
+  <div id="info">GLB를 열면 게임과 같은 조명·림라이트로 미리보기 + 통합 파라미터를 표시합니다.</div>
+  <script type="module" src="/src/viewer.ts"></script>
+</body>
+</html>
