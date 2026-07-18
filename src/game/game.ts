@@ -595,6 +595,7 @@ export class Game {
       }
     }
 
+    this.coordinateEnemies() // 무리 전술: 포위 슬롯 배정 (도주로 차단)
     for (const e of this.enemies) e.update(dt, this.player, this.projectiles)
 
     // 사망 처리 (분열·자폭은 여기서 발동)
@@ -693,6 +694,36 @@ export class Game {
   }
 
   /** 근접 공격: 전방위 범위 판정(자동이라 조준 없음) + 넉백 + 히트스톱 */
+  /**
+   * 무리 전술 조율 — 살아있는 근접 추격 적들을 플레이어 둘레의 각도 슬롯에 균등 배정.
+   * 각자 따로 몰려드는 대신 사방을 에워싸고, 첫 슬롯을 플레이어 도주 방향에 두어
+   * 길목을 막는다 → 거리유지+몰이사냥·카이팅 무력화. (결정론, ML 아님)
+   */
+  private coordinateEnemies(): void {
+    const px = this.player.pos.x
+    const pz = this.player.pos.z
+    // 추격(포위 대상) 적만 — 원거리(spitter)나 죽은 적은 슬롯에서 제외
+    const ring: Enemy[] = []
+    for (const e of this.enemies) {
+      if (!e.dead && e.type !== 'spitter') ring.push(e)
+    }
+    const n = ring.length
+    if (n === 0) return
+    // 도주 방향(플레이어 이동각). 정지 시 0.
+    const md = this.player.moveDir
+    const escape = md.x * md.x + md.z * md.z > 0.04 ? Math.atan2(md.z, md.x) : 0
+    // 현재 각도로 정렬 → 슬롯 배정 안정화(덜 튐)·서로 안 교차
+    ring.sort(
+      (a, b) =>
+        Math.atan2(a.pos.z - pz, a.pos.x - px) - Math.atan2(b.pos.z - pz, b.pos.x - px),
+    )
+    const step = (Math.PI * 2) / n
+    for (let i = 0; i < n; i++) {
+      // 균등 포위 + 첫 슬롯을 도주 방향에 두어 길목 차단
+      ring[i].targetAngle = escape + i * step
+    }
+  }
+
   private meleeSweep(): void {
     let hitAny = false
     for (const e of this.enemies) {

@@ -41,8 +41,8 @@ export class Enemy {
   private action: ActionName = 'chase'
   private thinkTimer = 0
   private strafeSign = Math.random() < 0.5 ? -1 : 1
-  /** 포위 방향 부호 — 접근 시 좌/우로 갈라져 여러 방향에서 에워쌈 (몰이사냥 방지) */
-  private flankSign = Math.random() < 0.5 ? -1 : 1
+  /** 좌표된 포위 슬롯 각도 (Game의 coordinator가 매 프레임 배정) — 무리가 사방을 막게 */
+  targetAngle = 0
   private knockback = new THREE.Vector3()
   private phase: AttackPhase = 'none'
   private phaseTimer = 0
@@ -243,14 +243,17 @@ export class Enemy {
     _steer.set(0, 0, 0)
     switch (this.action) {
       case 'chase': {
-        // 도주 예측 차단 — 플레이어 이동을 앞질러 겨냥 (거리유지+몰이사냥 무력화)
-        _steer.copy(player.pos).addScaledVector(player.moveDir, 2.6).sub(this.pos).setY(0)
+        // 좌표된 포위 — coordinator가 배정한 각도 슬롯(플레이어 예측 위치 둘레)으로 이동.
+        // 무리가 사방에 균등 배치 + 도주 방향에 집중 → 몰이사냥·카이팅 불가.
+        const r = spec.attackRange * 0.9
+        const cx = player.pos.x + player.moveDir.x * 2 // 도주 예측: 갈 곳을 둘러쌈
+        const cz = player.pos.z + player.moveDir.z * 2
+        _steer.set(
+          cx + Math.cos(this.targetAngle) * r - this.pos.x,
+          0,
+          cz + Math.sin(this.targetAngle) * r - this.pos.z,
+        )
         if (_steer.lengthSq() > 0.0001) _steer.normalize()
-        // 멀 때는 접근 방향에 접선 성분(고유 부호)을 더해 여러 방향에서 포위 → 한 덩어리로 안 몰림
-        if (dist > 4) {
-          _side.set(-_steer.z, 0, _steer.x).multiplyScalar(this.flankSign)
-          _steer.addScaledVector(_side, 0.7).normalize()
-        }
         break
       }
       case 'strafe':
