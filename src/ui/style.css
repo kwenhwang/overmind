@@ -61,7 +61,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   font-size: 12px; letter-spacing: .3em; color: #22d3ee; margin-bottom: 8px;
   text-transform: uppercase;
 }
-#report .report-pick { font-size: 22px; color: #cbd5e1; line-height: 1.4; }
+#report .report-pick { font-size: 27px; color: #e8eef5; line-height: 1.35; font-weight: 700; }
 #report .report-pick b { color: #fff; }
 #report .report-row b { color: #e8e8ec; }
 #report .report-memory {
@@ -69,8 +69,14 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   color: #c084fc; font-style: italic; font-size: 13px;
 }
 #report .report-counter {
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid #1e3a4a;
-  color: #ffb86b; font-weight: 600;
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid #3a2a1a;
+  color: #ffcf8f; font-weight: 700; font-size: 16px;
+}
+/* 카운터 공개 순간 펀치 — 확 커졌다 붉게 번쩍 */
+#report .report-counter.reveal { animation: counter-reveal .5s ease-out; }
+@keyframes counter-reveal {
+  0% { transform: scale(1.25); color: #fff; text-shadow: 0 0 18px rgba(255,90,60,.9); }
+  100% { transform: scale(1); color: #ffcf8f; text-shadow: none; }
 }
 
 #score {

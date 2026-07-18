@@ -270,6 +270,7 @@ export class Game {
   private startWave(): void {
     const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
     const design = this.pendingDesign ?? fallbackDesign(digest)
+    this.pendingDesign = null // 소비 후 즉시 비움 — 다음 웨이브가 직전 stale 설계를 재사용하던 버그 차단
     this.wave++
     this.state = 'playing'
     this.hud.hideIntermission()
@@ -647,7 +648,7 @@ export class Game {
     if (e.has('explode_on_death')) {
       this.effects.burst(e.pos, 0xf97316, 22, 11)
       this.effects.shake(0.5)
-      if (e.pos.distanceTo(this.player.pos) < 3.4) this.player.takeDamage(15)
+      if (e.pos.distanceTo(this.player.pos) < 4.2) this.player.takeDamage(24)
     }
     this.combo++
     this.comboTimer = 3
@@ -702,7 +703,7 @@ export class Game {
       hitAny = true
       // thorns: 근접 반격 가시 — 근접 의존을 처벌
       if (e.has('thorns') && !this.player.isDashing) {
-        this.player.takeDamage(4)
+        this.player.takeDamage(9)
         this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
       }
     }

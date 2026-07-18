@@ -256,14 +256,14 @@ function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDes
   const dodgeDev = Math.abs(digest.dodgeLeftPct - 50)
   const weaponDev = Math.abs(digest.meleeUsePct - 50)
   // 편향이 미미하면(둘 다 <12%p) 개입하지 않고 LLM 설계를 존중
-  if (dodgeDev < 12 && weaponDev < 12) return d
+  if (dodgeDev < 10 && weaponDev < 10) return d
 
   const spawns = d.spawns.map((s) => ({ ...s, modifiers: [...(s.modifiers ?? [])] }))
   let hazards = [...(d.hazards ?? [])]
   let bias = d.spawnBias
   let reason = d.counterReason
 
-  if (dodgeDev >= 12 && dodgeDev >= weaponDev) {
+  if (dodgeDev >= 10 && dodgeDev >= weaponDev) {
     // 회피 방향 봉쇄 — 그쪽에 스폰 몰고 가시밭을 깐다 (도망갈 곳을 없앤다)
     const left = digest.dodgeLeftPct > 50
     const pct = Math.max(digest.dodgeLeftPct, digest.dodgeRightPct)
@@ -273,7 +273,7 @@ function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDes
     reason = `회피 ${left ? '왼쪽' : '오른쪽'} ${pct}% — 그쪽을 가시로 봉쇄한다`
   } else if (digest.meleeUsePct > 50) {
     // 근접 집착 — 정면 실드로 접근을 막고 원거리 유닛으로 때린다
-    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'shielded_front'])
+    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'shielded_front', 'explode_on_death'])
     if (!spawns.some((s) => s.type === 'spitter')) {
       const flip = spawns.find((s) => s.type === 'drone') ?? spawns[spawns.length - 1]
       if (flip) flip.type = 'spitter'

@@ -130,6 +130,10 @@ export class Hud {
     if (!el) return
     el.textContent = `▶ 대응: ${reason}`
     el.classList.remove('hidden')
+    // 공개 순간 펀치 애니 (재적용 위해 리플로우)
+    el.classList.remove('reveal')
+    void el.offsetWidth
+    el.classList.add('reveal')
   }
 
   hideReport(): void {

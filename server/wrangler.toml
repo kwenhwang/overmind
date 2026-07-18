@@ -6,7 +6,7 @@ compatibility_date = "2026-07-01"
 #   OPENAI_API_KEY (기본 프로바이더) 또는 ANTHROPIC_API_KEY
 # 일반 변수:
 [vars]
-MODEL = "gpt-5.4-mini"
+MODEL = "gpt-4.1-nano"
 MAX_DAILY_CALLS = "2000"
 ALLOWED_ORIGINS = "https://kwenhwang.github.io,http://localhost:5199,http://localhost:4173"
 

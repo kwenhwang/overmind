@@ -4,7 +4,7 @@ import type { HazardSpec } from '../ai/schema'
 import type { Player } from './player'
 
 const HAZARD_RADIUS = 4.2
-const SPIKE_DPS = 9
+const SPIKE_DPS = 22
 
 /**
  * 아레나 해저드 — L2가 배치를 설계하고(플레이어 습관 기준 상대 위치),
@@ -59,7 +59,7 @@ export class Hazard {
       }
       return 1
     }
-    return 0.55 // slow_field
+    return 0.42 // slow_field (감속 강화)
   }
 
   /** 라벨을 해저드 중심 위에 투영 (게임이 매 프레임 카메라와 함께 호출) */

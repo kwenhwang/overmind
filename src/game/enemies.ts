@@ -259,8 +259,8 @@ export class Enemy {
 
     if (_steer.lengthSq() > 0) {
       // enrage_far: 플레이어가 거리를 벌리면 가속 (카이팅 처벌)
-      const enraged = this.has('enrage_far') && dist > 8
-      this.pos.addScaledVector(_steer.normalize(), spec.speed * (enraged ? 1.7 : 1) * dt)
+      const enraged = this.has('enrage_far') && dist > 6.5
+      this.pos.addScaledVector(_steer.normalize(), spec.speed * (enraged ? 2.1 : 1) * dt)
     }
     this.applyDisplay(dt)
   }
