@@ -85,6 +85,23 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
   })
 
+  // 에셋 업로드 — 뷰어의 '서버로 전송' 버튼이 생성한 GLB(base64)+슬롯을 올림.
+  // 개발자가 curl로 받아 public/models/에 통합. 최신본 'model-latest' 고정키.
+  app.post('/model', async (c) => {
+    const env = getEnv(c)
+    if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    const body = await c.req.text() // {slot, name, glb(base64)} JSON
+    if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
+    await env.DIAG.put('model-latest', body, { expirationTtl: 86400 })
+    return c.json({ ok: true })
+  })
+
+  app.get('/model', async (c) => {
+    const env = getEnv(c)
+    const v = env.DIAG ? await env.DIAG.get('model-latest') : null
+    return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
+  })
+
   // 게임플레이 로그(RL 데이터셋) 업로드/조회 — ?rl 모드 에피소드. KV 재사용.
   app.post('/rl', async (c) => {
     const env = getEnv(c)

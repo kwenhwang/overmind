@@ -19,6 +19,11 @@
     #bar select, #bar input[type=file] { font-size: 13px; color: #e8e8ec; background: rgba(0,0,0,.3);
       border: 1px solid #2f6b45; border-radius: 5px; padding: 5px 8px; }
     #bar .title { font-weight: 700; letter-spacing: .15em; color: #22d3ee; margin-right: 8px; }
+    #send { cursor: pointer; font-size: 13px; font-weight: 700; color: #0a0b0f; background: #4ade80;
+      border: 0; border-radius: 5px; padding: 7px 14px; }
+    #send:disabled { background: #2a3340; color: #6b7280; cursor: default; }
+    #send.sent { background: #22d3ee; }
+    #send.err { background: #f87171; }
     #drop {
       position: fixed; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center;
       pointer-events: none; color: #7dd3fc; font-size: 22px; letter-spacing: .1em;
@@ -52,6 +57,7 @@
     <label>애니 <select id="clip"><option value="-1">없음</option></select></label>
     <label><input type="checkbox" id="spin" checked /> 자동회전</label>
     <label><input type="checkbox" id="raw" /> 원본색(게임처리 끄기)</label>
+    <button id="send" disabled>🎮 서버로 전송</button>
   </div>
   <div id="drop">여기로 GLB 파일을 끌어다 놓으세요</div>
   <div id="info">GLB를 열면 게임과 같은 조명·림라이트로 미리보기 + 통합 파라미터를 표시합니다.</div>

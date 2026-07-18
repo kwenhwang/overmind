@@ -62,6 +62,10 @@ const spinChk = document.getElementById('spin') as HTMLInputElement
 const rawChk = document.getElementById('raw') as HTMLInputElement
 const info = document.getElementById('info') as HTMLDivElement
 const drop = document.getElementById('drop') as HTMLDivElement
+const sendBtn = document.getElementById('send') as HTMLButtonElement
+
+/** 개발자가 curl로 받아 통합하는 업로드 엔드포인트 (게임 LLM 프록시 재사용) */
+const PROXY = 'https://overmind-proxy.kwenhwang.workers.dev'
 
 const loader = new GLTFLoader()
 let current: THREE.Object3D | null = null
@@ -82,9 +86,51 @@ function triCount(obj: THREE.Object3D): number {
   return Math.round(t)
 }
 
+function abToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+async function sendToServer(): Promise<void> {
+  if (!lastBuffer) return
+  const sizeMB = lastBuffer.byteLength / 1024 / 1024
+  if (sizeMB > 16) {
+    sendBtn.textContent = `너무 큼(${sizeMB.toFixed(1)}MB) — 폴리·텍스처 낮추세요`
+    sendBtn.classList.add('err')
+    return
+  }
+  sendBtn.disabled = true
+  sendBtn.textContent = '전송 중…'
+  sendBtn.classList.remove('err', 'sent')
+  try {
+    const res = await fetch(`${PROXY}/model`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slot: slotSel.value, name: lastName, glb: abToBase64(lastBuffer) }),
+    })
+    const ok = res.ok && (await res.json()).ok
+    sendBtn.textContent = ok ? `전송됨 ✓ (${slotSel.value})` : '전송 실패'
+    sendBtn.classList.toggle('sent', !!ok)
+    sendBtn.classList.toggle('err', !ok)
+  } catch {
+    sendBtn.textContent = '전송 실패(네트워크)'
+    sendBtn.classList.add('err')
+  }
+  sendBtn.disabled = false
+}
+sendBtn.onclick = sendToServer
+
 function loadGLB(buffer: ArrayBuffer, fname: string): void {
   lastBuffer = buffer
   lastName = fname
+  sendBtn.disabled = false
+  sendBtn.classList.remove('sent', 'err')
+  sendBtn.textContent = '🎮 서버로 전송'
   loader.parse(
     buffer,
     '',
@@ -159,7 +205,7 @@ function showInfo(slot: string, fname: string, tris: number, mats: number, rawSi
     `삼각형 ${tris.toLocaleString()}${heavy} · 머티리얼 ${mats}\n` +
     `원본 크기 ${rawSize.x.toFixed(2)} × ${rawSize.y.toFixed(2)} × ${rawSize.z.toFixed(2)} (게임 크기로 ×${scale.toFixed(3)})\n` +
     `애니메이션: ${anim}\n` +
-    `<span class="norm">→ 이 GLB를 저장해 제게 주세요 (슬롯 ${slot}). 정면이 틀어져 보이면 알려주세요(faceY 조정).</span>`
+    `<span class="norm">→ 마음에 들면 위 <b>🎮 서버로 전송</b> 버튼을 누르세요 (슬롯 ${slot}로 업로드 → 개발자가 게임에 통합). 정면이 틀어져 보이면 알려주세요(faceY).</span>`
 }
 
 slotSel.onchange = () => lastBuffer && loadGLB(lastBuffer, lastName)

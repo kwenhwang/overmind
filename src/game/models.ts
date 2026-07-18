@@ -67,11 +67,6 @@ export function configureMaterial(mat: THREE.MeshStandardMaterial, name: ModelNa
     mat.color.getHSL(hsl)
     if (hsl.s > 0.25) mat.color.setHex(tint)
   }
-  if (name === 'player') {
-    mat.map = null
-    mat.color.setHex(0xf03a9b)
-    mat.roughness = 0.5
-  }
   addRim(mat, RIM_COLOR[name])
 }
 
