@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import {
   PLAYER, TOTAL_WAVES, WAVE_INTERMISSION_SEC, SPAWN_TELEGRAPH_SEC, SCORE, BOSS, GAME_VERSION,
 } from './config'
+import type { EnemyType } from './config'
 import { Boss } from './boss'
 import { World } from './world'
 import { Input, IS_TOUCH } from './input'
@@ -81,6 +82,8 @@ export class Game {
   private scoreMul = 1
   // 녹화 모드는 실시간 fps가 무의미 — 프로브 생략(블룸 유지)
   private fpsProbe = { frames: 0, start: 0, done: new URLSearchParams(location.search).has('record') }
+  // ?norender — 헤드리스 검증용 렌더 스킵 (swiftshader 병목 제거, 로직만 구동)
+  private noRender = new URLSearchParams(location.search).has('norender')
 
   constructor(canvas: HTMLCanvasElement) {
     this.world = new World(canvas)
@@ -140,11 +143,25 @@ export class Game {
         const v = e.pos.clone().project(this.world.camera)
         return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
       }).length,
+      // 포위 진단: 살아있는 근접 적의 플레이어 기준 각도(도) — 무리 전술 확산 검증·튜닝용
+      encAngles: this.enemies
+        .filter((e) => !e.dead && e.type !== 'spitter')
+        .map((e) => Math.round((Math.atan2(e.pos.z - this.player.pos.z, e.pos.x - this.player.pos.x) * 180) / Math.PI)),
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
     // 검증용: 임의 텔레메트리 → 카운터 설계 (인과 보장 레이어 확인)
     ;(window as unknown as Record<string, unknown>).__designFor = (d: TelemetryDigest) => fallbackDesign(d)
+    // 검증용: 근접 적 N기를 원형으로 스폰 (무리 전술 포위 확산 확인)
+    ;(window as unknown as Record<string, unknown>).__spawnRing = (type = 'drone', n = 6, mods: string[] = []) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2
+        const pos = new THREE.Vector3(Math.cos(a) * 10, 0, Math.sin(a) * 10)
+        const e = new Enemy(type as EnemyType, pos, this.world.scene, mods as never)
+        e.aggression = 4
+        this.enemies.push(e)
+      }
+    }
 
     // 쉬운 조작 토글 (타이틀) — localStorage 저장, 터치도 항상 자동전투라 데스크톱에서만 노출
     const easyToggle = document.getElementById('easy-toggle') as HTMLInputElement | null
@@ -442,7 +459,7 @@ export class Game {
     }
 
     if (this.state === 'title' || this.state === 'gameover' || this.state === 'victory') {
-      this.world.render()
+      if (!this.noRender) this.world.render()
       return
     }
 
@@ -533,7 +550,7 @@ export class Game {
     this.hud.setHp((this.player.hp / PLAYER.hp) * 100)
     this.world.followCamera(this.player.pos, dt)
     this.effects.applyShake(this.world.camera, dt)
-    this.world.render()
+    if (!this.noRender) this.world.render()
     this.input.endFrame()
 
     if (this.player.hp <= 0) this.endRun(false)

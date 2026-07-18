@@ -271,8 +271,11 @@ export class Enemy {
     }
 
     if (_steer.lengthSq() > 0) {
-      // 카이팅 처벌: 멀면 기본 가속(모디파이어 없어도), enrage_far면 더 강하게
-      const mult = this.has('enrage_far') && dist > 6.5 ? 2.2 : dist > 8 ? 1.45 : 1
+      // 카이팅 처벌: 공격범위를 벗어날수록 부드럽게 가속해 플레이어 속도를 넘어서게 →
+      // 거리유지가 불가능(반드시 접근). enrage_far면 훨씬 강하게(전용 헌터).
+      const over = dist - spec.attackRange
+      const ramp = over > 0 ? 1 + Math.min(over * 0.4, 1.1) : 1 // 공격범위 살짝 벗어나면 즉시 플레이어 속도 추월 → 최대 2.1x
+      const mult = this.has('enrage_far') && dist > 5 ? Math.max(ramp, 2.4) : ramp
       this.pos.addScaledVector(_steer.normalize(), spec.speed * mult * dt)
     }
     this.applyDisplay(dt)
