@@ -153,6 +153,17 @@ export class Game {
     })
     // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
     ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
+    // 검증용: 보스 예측 조준 확인 — moveDir +x일 때 예측 지점이 플레이어보다 앞(오른쪽)이면 리드 작동
+    ;(window as unknown as Record<string, unknown>).__bossDbg = () =>
+      this.boss
+        ? {
+            hp: Math.round(this.boss.hp),
+            phase: this.boss.phaseIndex,
+            habitBias: Number(this.boss.habitBias.toFixed(2)),
+            playerX: Number(this.player.pos.x.toFixed(2)),
+            predMoveRight: this.boss.debugPredict(this.player, 1, 0),
+          }
+        : null
     // 검증용: 임의 텔레메트리 → 카운터 설계 (인과 보장 레이어 확인)
     ;(window as unknown as Record<string, unknown>).__designFor = (d: TelemetryDigest) => fallbackDesign(d)
     // 검증용: 근접 적 N기를 원형으로 스폰 (무리 전술 포위 확산 확인)
@@ -498,6 +509,9 @@ export class Game {
       this.updateSpawnTelegraph(combatDt)
       this.updateCombat(combatDt)
       if (this.boss) {
+        // 라이브 습관 편향 주입 [-1,1] — 양수=오른쪽(월드+X)으로 잘 피함. 보스가 예측 조준에 반영.
+        const dd = this.telemetry.debugDodge()
+        this.boss.habitBias = (dd.right - dd.left) / 100
         this.boss.update(combatDt, this.player, this.projectiles)
         this.hud.setBossHp(this.boss.hpPct)
         if (this.boss.dead) this.onBossDefeated()

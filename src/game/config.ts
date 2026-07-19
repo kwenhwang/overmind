@@ -53,4 +53,14 @@ export const BOSS = {
   radialBurst: { count: 14, speed: 12, damage: 8, cooldown: 1.5 },
   targetedSlam: { warnSec: 0.7, radius: 3.6, damage: 18, cooldown: 2.0 },
   charge: { windup: 0.55, speed: 26, duration: 0.5, damage: 18, cooldown: 2.8 },
+  /** 지능 파라미터 — 데미지·HP는 손대지 않고 "어디를 노릴지·무엇을 언제 쓸지"만 조절.
+   *  텔레그래프는 유지되므로 방향을 꺾거나 대시하면 여전히 회피 가능(공정). */
+  ai: {
+    leadFactor: 0.6, // 예측 리드 강도(0=현재위치). 일정속도 이동을 앞질러 조준 → 치트 제거
+    habitLead: 1.6, // 선호 회피 방향(월드X)으로 추가 리드(유닛) — 반사적 습관 회피를 함정으로
+    chargeReaim: 2.0, // 돌진 중 재조준율(chargeDir lerp/초). 소량이라 옆걸음·대시는 통함
+    burstAimed: 5, // radial_burst에 예측 방향 집중 아크로 쏘는 추가 탄 수
+    cooldownMul: [1.0, 0.85, 0.72], // 페이즈별 쿨다운 배수(후반 촘촘 — 페이싱만, 데미지 불변)
+    habitFromPhase: 1, // 습관 학습을 켜는 페이즈(드라마 상승)
+  },
 } as const

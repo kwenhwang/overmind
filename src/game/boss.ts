@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { ARENA_RADIUS, BOSS } from './config'
+import { ARENA_RADIUS, BOSS, PLAYER } from './config'
 import { instantiate, collectMats, flashMats, getAnimations, findClip } from './models'
 import { sfx } from './sfx'
 import type { Player } from './player'
@@ -9,6 +9,9 @@ import type { BossDesign } from '../ai/schema'
 
 const _toPlayer = new THREE.Vector3()
 const _dir = new THREE.Vector3()
+const _predict = new THREE.Vector3()
+
+type BossAttack = 'radial_burst' | 'targeted_slam' | 'charge'
 
 interface Slam {
   ring: THREE.Mesh
@@ -64,6 +67,8 @@ export class Boss {
   private landed = false
   /** 페이즈 진입 콜백 (Game이 미니언·해저드·대사 처리) */
   onPhase?: (phaseIndex: number) => void
+  /** 라이브 습관 편향 [-1,1] — 양수=플레이어가 오른쪽(월드+X)으로 잘 피함. Game이 매 프레임 주입. */
+  habitBias = 0
 
   constructor(
     public design: BossDesign,
@@ -158,6 +163,38 @@ export class Boss {
     return this.design.phases[Math.min(this.phaseIndex, this.design.phases.length - 1)]
   }
 
+  /** 플레이어가 leadSec 뒤 있을 곳을 예측 (일정속도 이동을 앞질러 조준). moveDir는 단위벡터라
+   *  PLAYER.speed를 곱해 실제 이동 반영. 습관 학습이 켜지면 선호 회피쪽으로 추가 리드 → 반사적 회피가 함정. */
+  private predictPos(player: Player, leadSec: number, out: THREE.Vector3): THREE.Vector3 {
+    out.copy(player.pos)
+    out.addScaledVector(player.moveDir, PLAYER.speed * leadSec * BOSS.ai.leadFactor)
+    if (this.phaseIndex >= BOSS.ai.habitFromPhase) out.x += this.habitBias * BOSS.ai.habitLead
+    out.y = 0
+    const r = Math.hypot(out.x, out.z)
+    const maxR = ARENA_RADIUS - 1
+    if (r > maxR) {
+      out.x = (out.x / r) * maxR
+      out.z = (out.z / r) * maxR
+    }
+    return out
+  }
+
+  /** 상황 판단형 공격 선택 — LLM이 지정한 페이즈 공격(시그니처)에 가중치를 두되 거리로 상황 override. */
+  private chooseAttack(dist: number): BossAttack {
+    const sig = this.phase.attack as BossAttack
+    const situational: BossAttack = dist > 9 ? 'charge' : dist > 4.5 ? 'targeted_slam' : 'radial_burst'
+    return Math.random() < 0.55 ? sig : situational
+  }
+
+  /** 검증용 — 합성 moveDir로 예측 지점 계산(입력 주입 없이 리드 확인). */
+  debugPredict(player: Player, mx: number, mz: number, leadSec = BOSS.targetedSlam.warnSec): { x: number; z: number } {
+    const saved = player.moveDir.clone()
+    player.moveDir.set(mx, 0, mz)
+    const p = this.predictPos(player, leadSec, _predict).clone()
+    player.moveDir.copy(saved)
+    return { x: p.x, z: p.z }
+  }
+
   update(dt: number, player: Player, projectiles: ProjectilePool): void {
     this.time += dt
     this.mixer?.update(dt)
@@ -244,12 +281,14 @@ export class Boss {
   }
 
   private beginAttack(player: Player, projectiles: ProjectilePool): void {
-    const attack = this.phase.attack
+    const dist = this.pos.distanceTo(player.pos)
+    const attack = this.chooseAttack(dist) // 상황 판단(거리) + 시그니처 가중치
+    const cd = BOSS.ai.cooldownMul[Math.min(this.phaseIndex, BOSS.ai.cooldownMul.length - 1)] // 후반 촘촘
     // 공격 애니: 원거리 탄막은 사격(Shoot), 근접/돌진은 공격(Attack) 클립
     this.attackClip = attack === 'radial_burst' ? this.clips.shoot : this.clips.attack
     this.attackAnimTimer = 0.7
     if (attack === 'radial_burst') {
-      this.attackCooldown = BOSS.radialBurst.cooldown
+      this.attackCooldown = BOSS.radialBurst.cooldown * cd
       const n = BOSS.radialBurst.count
       const offset = Math.random() * Math.PI * 2
       for (let i = 0; i < n; i++) {
@@ -257,21 +296,32 @@ export class Boss {
         _dir.set(Math.cos(a), 0, Math.sin(a))
         projectiles.spawn(this.pos, _dir, BOSS.radialBurst.speed, BOSS.radialBurst.damage, false)
       }
+      // 예측 방향 집중 아크 — 간격 두고 드리프트하는 회피 차단
+      this.predictPos(player, 0.5, _predict).sub(this.pos).setY(0)
+      const base = Math.atan2(_predict.z, _predict.x)
+      const m = BOSS.ai.burstAimed
+      for (let i = 0; i < m; i++) {
+        const a = base + (i - (m - 1) / 2) * 0.12
+        _dir.set(Math.cos(a), 0, Math.sin(a))
+        projectiles.spawn(this.pos, _dir, BOSS.radialBurst.speed * 1.15, BOSS.radialBurst.damage, false)
+      }
       sfx.shoot()
     } else if (attack === 'targeted_slam') {
-      this.attackCooldown = BOSS.targetedSlam.cooldown
+      this.attackCooldown = BOSS.targetedSlam.cooldown * cd
+      // 예측 지점에 강타 — 직진하면 갈 곳에 떨어짐. 방향/속도를 바꿔야 회피
+      const target = this.predictPos(player, BOSS.targetedSlam.warnSec, _predict).clone()
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(BOSS.targetedSlam.radius * 0.85, BOSS.targetedSlam.radius, 40),
         new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
       )
       ring.rotation.x = -Math.PI / 2
-      ring.position.copy(player.pos).setY(0.08)
+      ring.position.copy(target).setY(0.08)
       this.scene.add(ring)
-      this.slams.push({ ring, pos: player.pos.clone(), timer: BOSS.targetedSlam.warnSec })
+      this.slams.push({ ring, pos: target, timer: BOSS.targetedSlam.warnSec })
       sfx.lungeWarn()
     } else {
       // charge
-      this.attackCooldown = BOSS.charge.cooldown
+      this.attackCooldown = BOSS.charge.cooldown * cd
       this.chargeState = 'windup'
       this.chargeTimer = BOSS.charge.windup
       sfx.lungeWarn()
@@ -285,12 +335,21 @@ export class Boss {
       if (this.chargeTimer <= 0) {
         this.chargeState = 'dash'
         this.chargeTimer = BOSS.charge.duration
-        this.chargeDir.copy(player.pos).sub(this.pos).setY(0).normalize()
+        // 예측 지점을 향해 돌진 — 일정 이동을 앞질러 조준
+        this.chargeDir
+          .copy(this.predictPos(player, BOSS.charge.windup + BOSS.charge.duration * 0.5, _predict))
+          .sub(this.pos)
+          .setY(0)
+          .normalize()
         this.chargeHit = false
       }
       return
     }
-    // dash
+    // dash — 약한 재조준(일정 이동은 처벌하되 옆걸음·막판 대시는 통함, 공정)
+    _dir.copy(player.pos).sub(this.pos).setY(0)
+    if (_dir.lengthSq() > 0.0001) {
+      this.chargeDir.lerp(_dir.normalize(), Math.min(1, BOSS.ai.chargeReaim * dt)).normalize()
+    }
     this.pos.addScaledVector(this.chargeDir, BOSS.charge.speed * dt)
     const r = this.pos.length()
     const maxR = ARENA_RADIUS - BOSS.radius
@@ -344,8 +403,9 @@ export class Boss {
       this.root.position.copy(this.pos).setY(BOSS.hoverY + Math.sin(this.time * 1.6) * 0.35)
       this.core.rotation.set(0, this.core.rotation.y + dt * (this.chargeState === 'windup' ? 5 : 0.5), 0)
     } else {
-      // 절차 생성 '눈' 코어(코어+궤도 링 분리): 전방 눈은 고정, 코어·링만 회전
+      // 절차 생성 '눈' 코어: 눈(-Z)이 플레이어를 추적(관찰자 컨셉) + 코어·링 회전
       this.root.position.copy(this.pos).setY(BOSS.hoverY + Math.sin(this.time * 1.6) * 0.3)
+      this.root.rotation.y = Math.atan2(-this.facingDir.x, -this.facingDir.z) // 눈이 널 본다
       this.core.rotation.y += dt * (this.chargeState === 'windup' ? 8 : 1.2)
       this.core.rotation.x = Math.sin(this.time * 0.8) * 0.4
       this.ring.rotation.y += dt * 1.4
