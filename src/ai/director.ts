@@ -272,13 +272,16 @@ function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDes
     hazards.unshift({ type: 'spike_zone', placement: left ? 'player_left' : 'player_right' })
     reason = `회피 ${left ? '왼쪽' : '오른쪽'} ${pct}% — 그쪽을 가시로 봉쇄한다`
   } else if (digest.meleeUsePct > 50) {
-    // 근접 집착 — 반격 가시+자폭으로 밀착을 처벌하고 원거리 유닛으로 전환 강제 (무적 실드는 쓰지 않음)
-    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'thorns', 'explode_on_death'])
-    if (!spawns.some((s) => s.type === 'spitter')) {
-      const flip = spawns.find((s) => s.type === 'drone') ?? spawns[spawns.length - 1]
-      if (flip) flip.type = 'spitter'
+    // 근접 집착 — '방패맨' 브루트가 정면을 막아 후방 침투를 강요 + 다른 유닛의 가시로 밀착 처벌 (방패↔가시 상호보완)
+    let brute = spawns.find((s) => s.type === 'brute')
+    if (!brute && spawns[0]) {
+      spawns[0].type = 'brute'
+      brute = spawns[0]
     }
-    reason = `근접 집착 ${digest.meleeUsePct}% — 밀착하면 가시로 반격, 원거리로 바꿔라`
+    if (brute) brute.modifiers = uniq([...brute.modifiers, 'shielded_front'])
+    const other = spawns.find((s) => s !== brute)
+    if (other) other.modifiers = uniq([...other.modifiers, 'thorns'])
+    reason = `근접 집착 ${digest.meleeUsePct}% — 방패맨은 뒤를 노리고, 밀착은 가시로 처벌한다`
   } else {
     // 카이팅(거리 유지) — 멀수록 가속하는 돌격 유닛으로 거리를 좁힌다
     let hasDrone = false

@@ -42,6 +42,12 @@ export const SPAWN_TELEGRAPH_SEC = 0.9
 
 export const SCORE = { drone: 100, spitter: 150, brute: 300, waveClear: 500, boss: 5000 } as const
 
+/** 정면 실드('방패맨') 난이도 — 메커니즘은 유지하되 여기서 조절. */
+export const SHIELD = {
+  /** 정면 차단 콘(dot 임계). 클수록 좁아짐 = 쉬움. 0.35≈139°(옛), 0.6≈106°. */
+  blockDot: 0.6,
+} as const
+
 export const BOSS = {
   radius: 1.8,
   hp: 900, // 750→900: 최종전 길이·중량감↑

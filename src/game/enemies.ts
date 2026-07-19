@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { ARENA_RADIUS, ENEMY_TYPES, type EnemyType } from './config'
+import { ARENA_RADIUS, ENEMY_TYPES, SHIELD, type EnemyType } from './config'
 import { events } from './events'
 import { instantiate, collectMats, flashMats, getAnimations, findClip } from './models'
 import type { Player } from './player'
@@ -74,8 +74,8 @@ export class Enemy {
     public modifiers: Modifier[] = [],
     variant: EnemyVariant = {},
   ) {
-    // 무적(정면 실드) 제거 — 앞에서 못 때리는 적이 너무 어렵다는 피드백. 출처 불문 여기서 일괄 차단.
-    this.modifiers = this.modifiers.filter((m) => m !== 'shielded_front')
+    // 방패('방패맨')는 덩치 큰 브루트만 — 빠른 드론·카이팅 스피터에 붙으면 후방 잡기가 불공정(너무 어려움).
+    if (type !== 'brute') this.modifiers = this.modifiers.filter((m) => m !== 'shielded_front')
     const spec = ENEMY_TYPES[type]
     this.scaleMul = variant.scaleMul ?? 1
     this.hp = Math.round(spec.hp * (variant.hpMul ?? 1))
@@ -474,7 +474,7 @@ export class Enemy {
   takeDamage(amount: number, knockDir?: THREE.Vector3, knockForce = 0, attackerPos?: THREE.Vector3): boolean {
     if (attackerPos && this.has('shielded_front')) {
       _toAttacker.copy(attackerPos).sub(this.pos).setY(0).normalize()
-      if (_toAttacker.dot(this.facingDir) > 0.35) return false // 정면 차단 — 등 뒤를 노려라
+      if (_toAttacker.dot(this.facingDir) > SHIELD.blockDot) return false // 정면 차단(좁은 콘) — 등 뒤를 노려라
     }
     this.hp -= amount
     if (knockDir && knockForce > 0) this.knockback.addScaledVector(knockDir, knockForce)
