@@ -11,3 +11,4 @@ assets/blender/*.blend1
 server/.wrangler/
 .wrangler/
 tools/_*.mjs
+tools/blender/__pycache__/

@@ -337,64 +337,82 @@ def make_brute():
     export(root, "brute.glb")
 
 
-# ── 보스: 오버마인드 — 발광 코어 + 부유 장갑판 + 홍채 + 이중 링 + 궤도 파편 ──
+# ── 보스: 오버마인드 — 글로우 '눈' 코어 + 각진 장갑 + 토성형 궤도 링 ──
+#    컨셉: 플레이어를 관찰하는 두뇌 = 정면의 발광 눈이 주인공. 정적 메시(절차 회전/호버는 런타임).
 def make_boss():
     clean_scene()
     shell = shell_mat()
-    orange = glow_mat("o-core", (1.0, 0.3, 0.06), strength=1.1)
-    ringm = material("o-ring", (0.12, 0.08, 0.05), emission=(1.0, 0.55, 0.2), strength=0.7, metallic=0.7)
+    core_m = glow_mat("o-core", (1.0, 0.30, 0.06), strength=1.6)
+    iris_m = glow_mat("o-iris", (1.0, 0.66, 0.24), strength=5.0)
+    pupil_m = glow_mat("o-pupil", (1.0, 0.95, 0.85), strength=16.0)
+    ring_m = material("o-ring", (0.06, 0.065, 0.08), emission=(1.0, 0.45, 0.15),
+                      strength=0.5, metallic=0.75, rough=0.35)
 
     root = root_empty("boss")
 
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.35)
+    # 코어: 어두운 다면체 구 — 내부 주황 발광
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=1.12)
     core = active()
-    set_mat(core, orange)
+    set_mat(core, core_m)
     parent(core, root, "core")
 
-    # 눈 (정면 -Y) — 어두운 소켓 + 밝은 홍채: 관찰자의 정체성
-    bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.62, depth=0.14)
-    socket = active()
-    socket.rotation_euler = (math.pi / 2, 0, 0)
-    socket.location = (0, -1.2, 0)  # 코어에 반쯤 파묻힘
-    set_mat(socket, shell)
-    parent(socket, root, "eye-socket")
+    # ── 눈 (정면 -Y): 오버마인드 정체성 — 소켓+홍채+돌출 동공 3층 + 눈두덩 ──
+    fy = -1.02
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.62, minor_radius=0.12,
+                                     major_segments=32, minor_segments=10)
+    sock = active()
+    sock.rotation_euler = (math.pi / 2, 0, 0)
+    sock.location = (0, fy - 0.02, 0)
+    set_mat(sock, shell)
+    parent(sock, root, "eye-socket")
 
-    bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.3, depth=0.1)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=0.52, depth=0.12)
     iris = active()
     iris.rotation_euler = (math.pi / 2, 0, 0)
-    iris.location = (0, -1.29, 0)
-    set_mat(iris, glow_mat("o-iris", (1.0, 0.85, 0.5), strength=6.0))
+    iris.location = (0, fy - 0.08, 0)
+    set_mat(iris, iris_m)
     parent(iris, root, "iris")
 
-    # 부유 장갑판 8개 — 코어에서 이격된 갑주 (틈새로 발광이 새어나옴)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=0.22)
+    pup = active()
+    pup.location = (0, fy - 0.22, 0)
+    pup.scale = (1, 0.6, 1)
+    set_mat(pup, pupil_m)
+    parent(pup, root, "pupil")
+
+    for sx in (-1, 1):
+        c = box((0.09, 0.5, 0.09), (0.32 * sx, fy + 0.08, 0.42),
+                rot=(math.radians(22), 0, math.radians(20 * sx)), bevel=0.02)
+        set_mat(c, shell)
+        parent(c, root, f"brow-{sx}")
+
+    # ── 부서진 장갑 셸: 정면(-Y) 중앙은 비워 눈 노출. 밖으로 밀어 실루엣을 각지게 ──
     plates = root_empty("plates")
     plates.parent = root
-    for i in range(8):
-        a = i * math.pi / 4 + math.pi / 8
-        z = 0.5 if i % 2 == 0 else -0.5
-        r = 1.62
-        pl = box((0.95, 0.7, 0.14), (math.cos(a) * r * 0.82, math.sin(a) * r * 0.82, z),
-                 rot=(math.radians(-35) * (1 if z > 0 else -1), 0, a + math.pi / 2), bevel=0.06)
-        set_mat(pl, shell)
-        parent(pl, plates, f"plate-{i}")
+    idx = 0
+    for lat_i, (lat, rlat) in enumerate(((0.70, 1.30), (0.0, 1.42), (-0.70, 1.30))):
+        n = 10
+        for i in range(n):
+            a = i * (2 * math.pi / n) + (math.pi / n if lat_i == 1 else 0)
+            fx, fyy = math.cos(a), math.sin(a)
+            if fyy < -0.45 and abs(fx) < 0.6 and lat <= 0.2:
+                continue  # 정면 눈 자리 비움
+            z = math.sin(lat) * 1.20
+            rr = math.cos(lat) * rlat
+            pl = box((0.58, 0.30, 0.42), (fx * rr, fyy * rr, z),
+                     rot=(0, 0, a + math.pi / 2), bevel=0.05)
+            set_mat(pl, shell)
+            parent(pl, plates, f"plate-{idx}")
+            idx += 1
 
-    for i, (name, tilt) in enumerate((("ring1", 0.5), ("ring2", -0.95))):
-        bpy.ops.mesh.primitive_torus_add(major_radius=2.3 + i * 0.4, minor_radius=0.07, major_segments=48, minor_segments=8)
+    # ── 궤도 링 2개: 살짝 기운 수평 궤도(토성형). 정면 수평의 눈을 안 가림 ──
+    for i, (rx, rmaj) in enumerate(((math.radians(14), 2.15), (math.radians(-16), 2.5))):
+        bpy.ops.mesh.primitive_torus_add(major_radius=rmaj, minor_radius=0.09,
+                                         major_segments=64, minor_segments=10)
         ring = active()
-        ring.rotation_euler = (tilt, 0.3 * (i + 1), 0)
-        set_mat(ring, ringm)
-        parent(ring, root, name)
-
-    shards = root_empty("shards")
-    shards.parent = root
-    for i in range(4):
-        a = i * math.pi / 2
-        bpy.ops.mesh.primitive_cone_add(vertices=4, radius1=0.24, radius2=0, depth=0.6)
-        s = active()
-        s.location = (math.cos(a) * 2.05, math.sin(a) * 2.05, 0)
-        s.rotation_euler = (0, math.radians(90), a)
-        set_mat(s, shell)
-        parent(s, shards, f"shard-{i}")
+        ring.rotation_euler = (rx, 0, math.radians(20 * i))
+        set_mat(ring, ring_m)
+        parent(ring, root, f"ring{i + 1}")  # ring1/ring2 — boss.ts가 이 이름으로 개별 회전 구동
 
     export(root, "boss.glb")
 

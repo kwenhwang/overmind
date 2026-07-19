@@ -41,4 +41,4 @@ cd server && npm install && npm run dev  # LLM 프록시 (OPENAI_API_KEY 권장 
 
 ## 개발 도구
 
-Claude Code (Anthropic Claude)로 전면 개발 — 게임 코드·사운드(WebAudio 신스)·셰이더·검증. 3D 모델은 CC0 에셋(적 유닛, Quaternius)과 생성 AI(플레이어·보스, Tripo)로 마련. 상세·라이선스는 [AI 활용 기술 문서](docs/ai-tech-doc.md)·[에셋 크레딧](public/models/CREDITS.md) 참조.
+Claude Code (Anthropic Claude)로 전면 개발 — 게임 코드·사운드(WebAudio 신스)·셰이더·검증. 3D 모델은 CC0 에셋(플레이어·적 유닛, Quaternius)과 자체 절차 생성(보스, Blender bpy)으로 마련. 상세·라이선스는 [AI 활용 기술 문서](docs/ai-tech-doc.md)·[에셋 크레딧](public/models/CREDITS.md) 참조.
