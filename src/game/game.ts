@@ -143,6 +143,9 @@ export class Game {
         const v = e.pos.clone().project(this.world.camera)
         return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
       }).length,
+      // 분대 스태거·반사회피 검증용 카운트
+      permits: this.enemies.filter((e) => !e.dead && e.attackPermit).length,
+      dodging: this.enemies.filter((e) => !e.dead && e.isDodging).length,
       // 포위 진단: 살아있는 근접 적의 플레이어 기준 각도(도) — 무리 전술 확산 검증·튜닝용
       encAngles: this.enemies
         .filter((e) => !e.dead && e.type !== 'spitter')
@@ -610,6 +613,16 @@ export class Game {
         _toEnemy.copy(this.player.facing).applyAxisAngle(_up, a)
         this.projectiles.spawn(this.player.pos, _toEnemy, PLAYER.ranged.speed, this.player.stats.rangedDamage, true)
       }
+      // 반사 회피: 조준선(~25°) 안·근거리의 적에게 회피 기회 (provokeDodge 내부에서 일부만 실제로 피함)
+      for (const e of this.enemies) {
+        if (e.dead) continue
+        _toEnemy.copy(e.pos).sub(this.player.pos)
+        _toEnemy.y = 0
+        const d = _toEnemy.length()
+        if (d < 0.5 || d > 16) continue
+        _toEnemy.multiplyScalar(1 / d)
+        if (_toEnemy.dot(this.player.facing) > 0.9) e.provokeDodge(this.player.facing)
+      }
     }
 
     this.coordinateEnemies() // 무리 전술: 포위 슬롯 배정 (도주로 차단)
@@ -738,7 +751,15 @@ export class Game {
     for (let i = 0; i < n; i++) {
       // 균등 포위 + 첫 슬롯을 도주 방향에 두어 길목 차단
       ring[i].targetAngle = escape + i * step
+      ring[i].attackPermit = false
     }
+    // 분대 공격 스태거: 지금 공격 준비된 근접 적 중 가장 가까운 K기에만 허가 → 한 번에 몇 기만 덤빔.
+    // 하나가 돌진/쿨다운에 들어가면 다음이 허가받아 '순번 압박'이 됨.
+    const ready = ring
+      .filter((e) => e.readyToAttack(this.player.pos))
+      .sort((a, b) => a.pos.distanceToSquared(this.player.pos) - b.pos.distanceToSquared(this.player.pos))
+    const permits = Math.max(1, Math.min(3, Math.ceil(n / 4)))
+    for (let i = 0; i < Math.min(permits, ready.length); i++) ready[i].attackPermit = true
   }
 
   private meleeSweep(): void {

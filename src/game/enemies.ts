@@ -43,6 +43,12 @@ export class Enemy {
   private strafeSign = Math.random() < 0.5 ? -1 : 1
   /** 좌표된 포위 슬롯 각도 (Game의 coordinator가 매 프레임 배정) — 무리가 사방을 막게 */
   targetAngle = 0
+  /** 분대 공격 스태거: coordinator가 매 프레임 소수에게만 true → 한 번에 몇 기만 덤빔 */
+  attackPermit = false
+  /** 반사 회피 — 플레이어 사격에 반응한 짧은 측면 스텝 */
+  private dodgeTimer = 0
+  private dodgeCooldown = 0
+  private dodgeVel = new THREE.Vector3()
   private knockback = new THREE.Vector3()
   private phase: AttackPhase = 'none'
   private phaseTimer = 0
@@ -233,6 +239,16 @@ export class Enemy {
       return
     }
 
+    // ── 반사 회피: 사격에 반응한 짧은 측면 버스트가 평시 이동을 잠깐 대체 ──
+    if (this.dodgeCooldown > 0) this.dodgeCooldown -= dt
+    if (this.dodgeTimer > 0) {
+      this.dodgeTimer -= dt
+      this.pos.addScaledVector(this.dodgeVel, dt)
+      this.dodgeVel.multiplyScalar(Math.max(0, 1 - dt * 6))
+      this.applyDisplay(dt)
+      return
+    }
+
     // ── 평시: L1 유틸리티 (100~300ms 틱) ──
     this.thinkTimer -= dt
     if (this.thinkTimer <= 0) {
@@ -281,6 +297,29 @@ export class Enemy {
     this.applyDisplay(dt)
   }
 
+  /** 반사 회피: 플레이어가 나를 조준해 쏘면 짧게 옆으로 스텝 (Game이 사격 시 조준각 안의 적에 호출).
+   *  항상 피하진 않음(랜덤 게이트) — 가끔 피해야 '읽고 반응'처럼 보이고 무적이 아님. */
+  provokeDodge(shotDir: THREE.Vector3): void {
+    if (this.dead || this.phase !== 'none' || this.dodgeCooldown > 0 || this.dodgeTimer > 0) return
+    if (Math.random() > 0.6) return // ~60%만 반응
+    const sign = Math.random() < 0.5 ? -1 : 1
+    // 사격선에 수직으로 이탈 (탄이 오는 방향의 옆)
+    this.dodgeVel.set(-shotDir.z, 0, shotDir.x).normalize().multiplyScalar(8.5 * sign)
+    this.dodgeTimer = 0.22
+    this.dodgeCooldown = 0.85 + Math.random() * 0.5
+  }
+
+  /** 반사 회피 중인지 (디버그 카운트용) */
+  get isDodging(): boolean {
+    return this.dodgeTimer > 0
+  }
+
+  /** 분대 스태거용: 지금 공격을 개시할 준비가 됐는가 (범위·쿨다운·단계) */
+  readyToAttack(playerPos: THREE.Vector3): boolean {
+    if (this.dead || this.phase !== 'none' || this.attackCooldown > 0 || this.dodgeTimer > 0) return false
+    return this.pos.distanceTo(playerPos) <= ENEMY_TYPES[this.type].attackRange
+  }
+
   /** mirror_dash: 플레이어의 대시를 감지해 같은 방향으로 돌진 (Game이 호출) */
   mirrorDash(dir: THREE.Vector3): void {
     if (!this.has('mirror_dash') || this.dead || this.phase !== 'none') return
@@ -320,9 +359,17 @@ export class Enemy {
     } else if (this.type === 'spitter') {
       this.phase = 'none'
       events.emit('spitterShot', { pos: this.pos })
+      // 리드샷: 플레이어 이동방향으로 예측 지점을 겨냥 (거리 비례, 상한). 원거리가 '노림수' 있어 보이게.
+      const lead = Math.min(dist * 0.32, 4)
+      _toPlayer
+        .copy(player.pos)
+        .addScaledVector(player.moveDir, lead)
+        .sub(this.pos)
+        .setY(0)
+        .normalize()
       projectiles.spawn(
         this.pos,
-        _toPlayer.copy(player.pos).sub(this.pos).setY(0).normalize(),
+        _toPlayer,
         ENEMY_TYPES.spitter.projectileSpeed,
         ENEMY_TYPES.spitter.damage,
         false,
@@ -388,9 +435,12 @@ export class Enemy {
     const spec = ENEMY_TYPES[this.type]
     const aggro = this.aggression / 3 // 1.0 = 기본
 
+    // 근접 공격은 분대 허가가 있을 때만 — 한 번에 몇 기만 덤비고 나머지는 포위 유지(순번 압박).
+    // 스피터(원거리)는 스태거 대상 아님(허가 무관하게 사격).
+    const meleeReady = dist <= spec.attackRange && this.attackCooldown <= 0
     const scores: Record<ActionName, number> = {
       chase: dist > spec.attackRange ? 0.6 * aggro : 0.1,
-      attack: dist <= spec.attackRange && this.attackCooldown <= 0 ? 1.0 * aggro : 0,
+      attack: meleeReady && this.attackPermit ? 1.0 * aggro : 0,
       strafe: dist < spec.attackRange * 2.5 ? 0.35 / aggro : 0.1,
       keepDistance: 0,
     }
