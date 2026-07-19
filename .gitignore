@@ -13,3 +13,4 @@ server/.wrangler/
 tools/_*.mjs
 tools/blender/__pycache__/
 tools/pdf/intro.html
+tools/pdf/ai-doc.html

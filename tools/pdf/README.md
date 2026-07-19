@@ -12,3 +12,11 @@ node tools/pdf/render.mjs "$PWD/tools/pdf/intro.html" "$PWD/docs/game-intro.pdf"
 ```
 
 내용의 정본은 `docs/game-intro.md`. 문구를 바꾸면 `build_intro.py`도 함께 갱신할 것.
+
+## ai-tech-doc.pdf (5p)
+AI 활용 기술 문서 PDF. 소스는 `build_ai_doc.py`(이미지 없음, 순수 문서):
+```bash
+python3 tools/pdf/build_ai_doc.py tools/pdf/ai-doc.html
+node tools/pdf/render.mjs "$PWD/tools/pdf/ai-doc.html" "$PWD/docs/ai-tech-doc.pdf"
+```
+정본은 `docs/ai-tech-doc.md`. 문구를 바꾸면 `build_ai_doc.py`도 함께 갱신할 것.
