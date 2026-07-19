@@ -605,6 +605,7 @@ export class Game {
       this.tickFire = true
       this.telemetry.recordRanged()
       sfx.shoot()
+      this.effects.muzzleFlash(this.player.pos, this.player.facing) // 총구 섬광 — 사격 손맛
       // multishot: 조준 방향 중심으로 각도 분산 발사
       const n = this.player.stats.multishot
       const spread = 0.14
@@ -670,8 +671,11 @@ export class Game {
     this.telemetry.recordKill(e.type)
     this.rl?.addReward(1)
     sfx.enemyDie()
-    this.effects.burst(e.pos, e.color, 14, 8)
-    this.effects.shake(0.25)
+    // 처치 팝 — 무게를 타입별로: 브루트(탱크)는 묵직하게, 잔몹은 경쾌하게
+    const heavy = e.type === 'brute'
+    this.effects.burst(e.pos, e.color, heavy ? 24 : 16, heavy ? 10 : 8)
+    this.effects.shake(heavy ? 0.5 : 0.28)
+    this.effects.hitstop(heavy ? 0.08 : 0.038) // 처치 순간 미세 정지 = "팝"
     this.world.ripple(e.pos) // 처치 파동
 
     // split_on_death: 소형 드론 2기로 분열
@@ -838,7 +842,7 @@ export class Game {
           if (p.pos.distanceToSquared(this.boss.pos) < hitDist * hitDist) {
             if (this.boss.takeDamage(p.damage)) {
               sfx.enemyHit()
-              this.effects.burst(this.boss.pos, 0xffb86b, 3, 4)
+              this.effects.burst(this.boss.pos, 0xffb86b, 5, 6)
               this.effects.damageNumber(this.boss.pos, String(p.damage))
             } else {
               this.effects.damageNumber(this.boss.pos, '무적', 'blocked')
@@ -857,7 +861,7 @@ export class Game {
             const applied = e.takeDamage(p.damage, _toEnemy, 3, from)
             if (applied) {
               sfx.enemyHit()
-              this.effects.burst(e.pos, 0xa5f3fc, 3, 4)
+              this.effects.burst(e.pos, 0xa5f3fc, 6, 8) // 명중 스파크 — 크런치
               this.effects.damageNumber(e.pos, String(p.damage))
             } else {
               this.effects.damageNumber(e.pos, '차단', 'blocked')
