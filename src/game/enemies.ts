@@ -74,6 +74,8 @@ export class Enemy {
     public modifiers: Modifier[] = [],
     variant: EnemyVariant = {},
   ) {
+    // 무적(정면 실드) 제거 — 앞에서 못 때리는 적이 너무 어렵다는 피드백. 출처 불문 여기서 일괄 차단.
+    this.modifiers = this.modifiers.filter((m) => m !== 'shielded_front')
     const spec = ENEMY_TYPES[type]
     this.scaleMul = variant.scaleMul ?? 1
     this.hp = Math.round(spec.hp * (variant.hpMul ?? 1))

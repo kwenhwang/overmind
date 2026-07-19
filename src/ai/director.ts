@@ -272,13 +272,13 @@ function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDes
     hazards.unshift({ type: 'spike_zone', placement: left ? 'player_left' : 'player_right' })
     reason = `회피 ${left ? '왼쪽' : '오른쪽'} ${pct}% — 그쪽을 가시로 봉쇄한다`
   } else if (digest.meleeUsePct > 50) {
-    // 근접 집착 — 정면 실드로 접근을 막고 원거리 유닛으로 때린다
-    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'shielded_front', 'explode_on_death'])
+    // 근접 집착 — 반격 가시+자폭으로 밀착을 처벌하고 원거리 유닛으로 전환 강제 (무적 실드는 쓰지 않음)
+    if (spawns[0]) spawns[0].modifiers = uniq([...spawns[0].modifiers, 'thorns', 'explode_on_death'])
     if (!spawns.some((s) => s.type === 'spitter')) {
       const flip = spawns.find((s) => s.type === 'drone') ?? spawns[spawns.length - 1]
       if (flip) flip.type = 'spitter'
     }
-    reason = `근접 집착 ${digest.meleeUsePct}% — 정면 실드로 막고 원거리로 때린다`
+    reason = `근접 집착 ${digest.meleeUsePct}% — 밀착하면 가시로 반격, 원거리로 바꿔라`
   } else {
     // 카이팅(거리 유지) — 멀수록 가속하는 돌격 유닛으로 거리를 좁힌다
     let hasDrone = false
