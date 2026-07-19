@@ -314,6 +314,11 @@ export class Enemy {
     return this.dodgeTimer > 0
   }
 
+  /** 공격 연출(예고/돌진) 중인지 — 분리력이 공격 라인을 밀어내지 않게 */
+  get isAttacking(): boolean {
+    return this.phase !== 'none'
+  }
+
   /** 분대 스태거용: 지금 공격을 개시할 준비가 됐는가 (범위·쿨다운·단계) */
   readyToAttack(playerPos: THREE.Vector3): boolean {
     if (this.dead || this.phase !== 'none' || this.attackCooldown > 0 || this.dodgeTimer > 0) return false

@@ -627,6 +627,7 @@ export class Game {
 
     this.coordinateEnemies() // 무리 전술: 포위 슬롯 배정 (도주로 차단)
     for (const e of this.enemies) e.update(dt, this.player, this.projectiles)
+    this.separateEnemies() // 겹침 해소: 한 점에 뭉치지 않게 (공격/돌진 중인 적은 라인 유지)
 
     // 사망 처리 (분열·자폭은 여기서 발동)
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -760,6 +761,31 @@ export class Game {
       .sort((a, b) => a.pos.distanceToSquared(this.player.pos) - b.pos.distanceToSquared(this.player.pos))
     const permits = Math.max(1, Math.min(3, Math.ceil(n / 4)))
     for (let i = 0; i < Math.min(permits, ready.length); i++) ready[i].attackPermit = true
+  }
+
+  /** 겹침 해소 — 반경 합보다 가까운 적 쌍을 서로 밀어냄(각자 침투량 절반).
+   *  공격/돌진 중(isAttacking) 적은 밀지 않아 예고한 공격 라인이 유지됨. */
+  private separateEnemies(): void {
+    const list = this.enemies
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i]
+      if (a.dead) continue
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j]
+        if (b.dead) continue
+        const dx = b.pos.x - a.pos.x
+        const dz = b.pos.z - a.pos.z
+        const min = (a.radius + b.radius) * 0.9
+        const d2 = dx * dx + dz * dz
+        if (d2 >= min * min || d2 < 1e-6) continue
+        const d = Math.sqrt(d2)
+        const push = (min - d) * 0.5
+        const nx = dx / d
+        const nz = dz / d
+        if (!a.isAttacking) { a.pos.x -= nx * push; a.pos.z -= nz * push }
+        if (!b.isAttacking) { b.pos.x += nx * push; b.pos.z += nz * push }
+      }
+    }
   }
 
   private meleeSweep(): void {
