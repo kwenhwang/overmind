@@ -371,9 +371,11 @@ export class Game {
     // 설계 도착 + 최소 연출 2초 후: 판결문 낭독
     if (this.bossDesign && this.verdictTimer < 0 && this.bossIntroElapsed >= 2) {
       this.hud.hideIntermission()
-      this.hud.showTaunt(this.bossDesign.verdict, 10)
+      // 분석 낭독 대신 한 줄 위협만 — "관찰했다"의 증거는 웨이브 리포트가 이미 보여줌. 보스는 짧고 위압적으로.
+      const line = this.bossDesign.verdict.split(/(?<=[.!?…。])\s/)[0].slice(0, 60)
+      this.hud.showTaunt(line, 4.5)
       sfx.taunt()
-      this.verdictTimer = 6
+      this.verdictTimer = 3.5
     }
     if (this.verdictTimer > 0) {
       this.verdictTimer -= dt
@@ -397,8 +399,11 @@ export class Game {
   /** 페이즈 진입 — LLM이 설계한 지원 스폰·해저드·대사 실행 */
   private enterBossPhase(phase: BossPhase): void {
     this.hud.setBossPhaseName(phase.name)
-    this.hud.showTaunt(phase.taunt)
-    sfx.taunt()
+    // 페이즈0 바크는 방금 낭독한 인트로와 겹쳐 '연속 수다'가 되므로 생략 — 실제 전환(1+)에서만 짧게.
+    if (this.boss && this.boss.phaseIndex > 0) {
+      this.hud.showTaunt(phase.taunt)
+      sfx.taunt()
+    }
     this.effects.shake(0.35)
     this.clearHazards()
     for (const h of (phase.hazards ?? []).slice(0, 2)) {
