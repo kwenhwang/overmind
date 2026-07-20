@@ -23,11 +23,11 @@
     <div id="report" class="hidden"></div>
     <div id="upgrades" class="hidden"></div>
     <section id="prediction" class="hidden" aria-label="오버마인드 예측">
-      <div class="prediction-kicker">OVERMIND PREDICTION</div>
+      <div class="prediction-kicker">AI 예측 · 반대로 행동하면 EMP</div>
       <div id="prediction-label"></div>
       <div id="prediction-source"></div>
-      <div id="anomaly-readout" aria-live="polite">분석 대기</div>
-      <div id="anomaly-progress" role="progressbar" aria-label="예측 탈피 진행도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="anomaly-readout" aria-live="polite">EMP 목표 분석 중</div>
+      <div id="anomaly-progress" role="progressbar" aria-label="EMP 충전 진행도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div id="anomaly-progress-bar"></div>
       </div>
     </section>
@@ -36,25 +36,8 @@
     <div id="joy-base" class="hidden"><div id="joy-knob"></div></div>
     <button id="diag-btn" class="hidden" title="화면이 이상하면 눌러 개발자에게 전송">진단 전송</button>
   </div>
-  <div id="prediction-scan" class="hidden" aria-hidden="true">
-    <div class="scan-grid"></div>
-    <div class="scan-sweep"></div>
-    <div class="scan-zone scan-left"></div>
-    <div class="scan-zone scan-right"></div>
-    <div class="scan-zone scan-center"></div>
-    <div class="scan-zone scan-edge"></div>
-    <div class="scan-zone scan-player"><span></span></div>
-    <div class="scan-copy">
-      <div id="scan-kicker">BEHAVIORAL SCAN</div>
-      <strong id="scan-label">관찰 데이터 동기화</strong>
-      <span id="scan-detail"></span>
-    </div>
-  </div>
-  <div id="prediction-result" class="hidden" role="status" aria-live="assertive"></div>
-  <div id="anomaly-emp" class="hidden" role="status" aria-live="assertive">
+  <div id="anomaly-emp" class="hidden" aria-hidden="true">
     <div class="emp-ring"></div>
-    <strong>ANOMALY EMP</strong>
-    <span id="anomaly-bonus"></span>
   </div>
   <div id="screen" class="booting" role="dialog" aria-modal="true" aria-busy="true">
     <div class="brand-sigil" aria-hidden="true"><span></span></div>

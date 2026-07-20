@@ -208,8 +208,8 @@ export class Game {
       this.hud.showScreen(
         'OVERMIND',
         IS_TOUCH
-          ? '적 웨이브 11개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
-          : '적 웨이브 11개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n\n이동 WASD·방향키 · 조준 마우스 · 사격 좌클릭\n대시(무적) Space 또는 우클릭 · 근접은 밀착 시 자동',
+          ? '적 웨이브 11개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n공개된 예측과 반대로 행동하면 EMP가 발동한다.\n\n왼쪽 화면 드래그 = 이동 · 오른쪽 탭 = 대시(무적)\n공격은 자동 — 회피에 집중하라'
+          : '적 웨이브 11개를 버텨라.\n적의 두뇌(AI)가 네 플레이 습관을 관찰하고, 다음 웨이브를 너를 잡도록 재설계한다.\n공개된 예측과 반대로 행동하면 EMP가 발동한다.\n\n이동 WASD·방향키 · 조준 마우스 · 사격 좌클릭\n대시(무적) Space 또는 우클릭 · 근접은 밀착 시 자동',
         'START',
         () => this.startRun(),
       )
@@ -319,6 +319,7 @@ export class Game {
     // pendingDesign은 프리페치가 채웠을 수 있으므로 여기서 지우지 않는다 (재요청 시 else에서 초기화)
     this.clearHazards()
     this.projectiles.clear()
+    this.hud.showPrediction(null)
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
     const evidence = this.telemetry.currentEvidence()
@@ -330,18 +331,11 @@ export class Game {
       ? this.prefetchedPrediction
       : buildPredictionContract(this.wave, evidence)
     this.hud.showReport(digest, memory.profile()) // 오버마인드가 "본 것"과 "기억"을 노출
-    this.hud.showPrediction(this.pendingPrediction)
-    if (this.pendingPrediction) {
-      const runId = this.runId
-      void this.hud.playPredictionScan(this.pendingPrediction).then(() => {
-        if (runId !== this.runId || this.state !== 'intermission') return
-        if (this.pendingPrediction?.target === 'unreadable') {
-          const bonus = Math.round(200 * this.wave * this.scoreMul)
-          this.score += bonus
-          this.hud.setScore(this.score, this.combo)
-          this.hud.showUnreadable(bonus)
-        }
-      })
+    if (this.pendingPrediction?.target === 'unreadable') {
+      const bonus = Math.round(200 * this.wave * this.scoreMul)
+      this.score += bonus
+      this.hud.setScore(this.score, this.combo)
+      this.hud.showUnreadable(bonus)
     }
     if (this.prefetchedWave === this.wave) {
       // 전투 중 프리페치가 이미 이 웨이브의 설계를 받았으면 그대로 사용 (LLM 대사 노출)
@@ -414,7 +408,6 @@ export class Game {
     this.hud.hideUpgrades()
     this.hud.setWave(this.wave, TOTAL_WAVES)
     this.hud.showPrediction(this.activePrediction)
-    this.hud.setAnomalyProgress(null)
     this.hud.showTaunt(design.taunt)
     sfx.taunt()
     this.telemetry.startWave()
@@ -445,11 +438,7 @@ export class Game {
     if (evaluation?.status === 'broken') this.triggerAnomaly()
     this.telemetry.endWave()
     this.combatStarted = false
-    if (evaluation) {
-      this.hud.setAnomalyProgress(evaluation)
-      if (evaluation.status === 'tracking') this.hud.showPredictionResult('followed')
-      else if (evaluation.status === 'unreadable') this.hud.showPredictionResult('unreadable')
-    }
+    if (evaluation && evaluation.status !== 'broken') this.hud.setAnomalyProgress(evaluation)
     this.activePrediction = null
   }
 
@@ -466,8 +455,9 @@ export class Game {
   }
 
   private triggerAnomaly(): void {
-    if (this.anomalyTriggered) return
+    if (this.anomalyTriggered || !this.activePrediction) return
     this.anomalyTriggered = true
+    const target = this.activePrediction.target
     this.activePrediction = null
     const bonus = Math.round(500 * this.wave * this.scoreMul)
     this.score += bonus
@@ -478,8 +468,7 @@ export class Game {
     this.world.ripple(this.player.pos)
     sfx.anomaly()
     this.hud.setScore(this.score, this.combo)
-    this.hud.showPredictionResult('broken')
-    this.hud.showAnomalyEmp(bonus)
+    this.hud.showAnomalyEmp(bonus, target)
   }
 
   private clearPendingSpawn(): void {

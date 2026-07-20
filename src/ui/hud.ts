@@ -14,8 +14,8 @@ function escapeHtml(s: string): string {
 type PredictionTarget = PredictionContract['target']
 
 const TARGET_LABELS: Record<PredictionTarget, string> = {
-  dodge_left: '왼쪽 회피를 반복한다',
-  dodge_right: '오른쪽 회피를 반복한다',
+  dodge_left: '왼쪽 이동을 반복한다',
+  dodge_right: '오른쪽 이동을 반복한다',
   melee: '근접 공격에 집착한다',
   ranged: '원거리 공격을 고수한다',
   center: '아레나 중앙으로 모인다',
@@ -23,7 +23,15 @@ const TARGET_LABELS: Record<PredictionTarget, string> = {
   unreadable: 'UNREADABLE',
 }
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const EMP_GOALS: Record<PredictionTarget, string> = {
+  dodge_left: '오른쪽 이동 60% · 2.5초 관측',
+  dodge_right: '왼쪽 이동 60% · 2.5초 관측',
+  melee: '원거리 피해 60% · 총 80 피해',
+  ranged: '근접 피해 60% · 총 80 피해',
+  center: '외곽 평균 거리 55% 이상 · 5초',
+  edge: '중앙 평균 거리 45% 이하 · 5초',
+  unreadable: '균형 패턴 유지',
+}
 
 export class Hud {
   private hpBar = $<HTMLDivElement>('hp-bar')
@@ -41,14 +49,10 @@ export class Hud {
   private anomalyReadout = $<HTMLDivElement>('anomaly-readout')
   private anomalyProgress = $<HTMLDivElement>('anomaly-progress')
   private anomalyProgressBar = $<HTMLDivElement>('anomaly-progress-bar')
-  private predictionScan = $<HTMLDivElement>('prediction-scan')
-  private predictionResult = $<HTMLDivElement>('prediction-result')
   private anomalyEmp = $<HTMLDivElement>('anomaly-emp')
   private tauntTimer: ReturnType<typeof setTimeout> | undefined
   private typeTimer: ReturnType<typeof setInterval> | undefined
-  private resultTimer: ReturnType<typeof setTimeout> | undefined
   private empTimer: ReturnType<typeof setTimeout> | undefined
-  private scanSequence = 0
   private upgradeCleanup: (() => void) | undefined
   private predictionKey = ''
 
@@ -180,10 +184,6 @@ export class Hud {
   showPrediction(contract: PredictionContract | null): void {
     if (!contract) {
       this.predictionKey = ''
-      this.scanSequence++
-      this.predictionScan.className = 'hidden'
-      this.predictionScan.removeAttribute('data-target')
-      this.predictionScan.setAttribute('aria-hidden', 'true')
       this.prediction.classList.add('hidden')
       this.prediction.removeAttribute('data-target')
       this.setAnomalyProgress(null)
@@ -201,22 +201,26 @@ export class Hud {
       contract.target === 'unreadable'
         ? `WAVE ${contract.sourceWave} · 패턴 균형 유지`
         : `WAVE ${contract.sourceWave} 관측치 ${observedPct}%`
+    this.anomalyReadout.textContent =
+      contract.target === 'unreadable'
+        ? '패턴 없음 · 웨이브 종료 보너스'
+        : `EMP 목표 · ${EMP_GOALS[contract.target]}`
+    this.anomalyProgress.setAttribute('aria-valuetext', this.anomalyReadout.textContent)
     this.prediction.classList.remove('hidden')
   }
 
   /** 현재 행동이 AI 예측에서 얼마나 벗어났는지 0..1 진행도로 표시. */
   setAnomalyProgress(evaluation: AnomalyEvaluation | null): void {
     if (!evaluation) {
-      this.anomalyReadout.textContent = '분석 대기'
+      this.anomalyReadout.textContent = 'EMP 목표 분석 중'
       this.anomalyProgressBar.style.width = '0%'
       this.anomalyProgress.setAttribute('aria-valuenow', '0')
-      this.anomalyProgress.setAttribute('aria-valuetext', '분석 대기')
+      this.anomalyProgress.setAttribute('aria-valuetext', 'EMP 목표 분석 중')
       this.prediction.classList.remove('is-broken', 'is-unreadable')
       return
     }
 
     const progressPct = Math.round(Math.min(1, Math.max(0, evaluation.progress)) * 100)
-    const targetPct = Math.round(Math.min(100, Math.max(0, evaluation.targetPct)))
     this.anomalyProgressBar.style.width = `${progressPct}%`
     this.anomalyProgress.setAttribute('aria-valuenow', String(progressPct))
     this.prediction.classList.toggle('is-broken', evaluation.status === 'broken')
@@ -224,92 +228,43 @@ export class Hud {
 
     switch (evaluation.status) {
       case 'insufficient':
-        this.anomalyReadout.textContent = `반대 행동 근거 ${progressPct}% · 현재 ${targetPct}%`
+        this.anomalyReadout.textContent = `EMP 충전 ${progressPct}% · ${EMP_GOALS[evaluation.target]}`
         break
       case 'tracking':
-        this.anomalyReadout.textContent = `예측 탈피 ${progressPct}% · 현재 ${targetPct}%`
+        this.anomalyReadout.textContent = `EMP 충전 ${progressPct}% · ${EMP_GOALS[evaluation.target]}`
         break
       case 'broken':
-        this.anomalyReadout.textContent = '예측 파괴 — EMP 준비 완료'
+        this.anomalyReadout.textContent = '예측 파괴 → EMP 발동'
         break
       case 'unreadable':
-        this.anomalyReadout.textContent = '패턴 해독 실패 — UNREADABLE'
+        this.anomalyReadout.textContent = '패턴 없음 · 웨이브 종료 보너스'
         break
     }
     this.anomalyProgress.setAttribute('aria-valuetext', this.anomalyReadout.textContent)
   }
 
-  /** 관찰→습관 영역 점등→예측 잠금의 인터미션 연출. */
-  async playPredictionScan(contract: PredictionContract): Promise<void> {
-    const sequence = ++this.scanSequence
-    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
-    const scanMs = reducedMotion ? 20 : 420
-    const targetMs = reducedMotion ? 20 : 620
-    const lockMs = reducedMotion ? 60 : 650
-    const scanKicker = $<HTMLDivElement>('scan-kicker')
-    const scanLabel = $<HTMLElement>('scan-label')
-    const scanDetail = $<HTMLSpanElement>('scan-detail')
-
-    this.predictionScan.dataset.target = contract.target
-    this.predictionScan.className = ''
-    this.predictionScan.classList.add('scan-active')
-    this.predictionScan.setAttribute('aria-hidden', 'false')
-    scanKicker.textContent = 'BEHAVIORAL SCAN'
-    scanLabel.textContent = '행동 패턴 재구성'
-    scanDetail.textContent = `WAVE ${contract.sourceWave} 관측 데이터`
-    void this.predictionScan.offsetWidth
-
-    await wait(scanMs)
-    if (sequence !== this.scanSequence) return
-    this.predictionScan.classList.add('target-acquired')
-    scanLabel.textContent = TARGET_LABELS[contract.target]
-    scanDetail.textContent =
-      contract.target === 'unreadable'
-        ? '유효한 편향을 찾지 못했다'
-        : `행동 집중도 ${Math.round(contract.observedPct)}%`
-
-    await wait(targetMs)
-    if (sequence !== this.scanSequence) return
-    this.predictionScan.classList.add('prediction-locked')
-    scanKicker.textContent = contract.target === 'unreadable' ? 'SIGNAL LOST' : 'PREDICTION LOCKED'
-    this.showPrediction(contract)
-
-    await wait(lockMs)
-    if (sequence !== this.scanSequence) return
-    this.predictionScan.classList.add('scan-out')
-    await wait(reducedMotion ? 20 : 220)
-    if (sequence !== this.scanSequence) return
-    this.predictionScan.className = 'hidden'
-    this.predictionScan.removeAttribute('data-target')
-    this.predictionScan.setAttribute('aria-hidden', 'true')
-  }
-
-  /** 예측의 최종 판정을 화면 중앙에 짧게 노출. */
-  showPredictionResult(result: 'broken' | 'followed' | 'unreadable'): void {
-    clearTimeout(this.resultTimer)
-    this.predictionResult.className = ''
-    this.predictionResult.classList.add(`result-${result}`)
-    this.predictionResult.textContent =
-      result === 'broken'
-        ? 'PREDICTION BROKEN'
-        : result === 'unreadable'
-          ? 'UNREADABLE — NO PATTERN FOUND'
-          : 'PREDICTION CONFIRMED'
-    void this.predictionResult.offsetWidth
-    this.predictionResult.classList.add('show')
-    this.resultTimer = setTimeout(() => this.predictionResult.classList.add('hidden'), 1800)
-  }
-
-  /** 균형 플레이 보상용 별도 메시지. */
+  /** 균형 플레이 보상을 인터미션 리포트에 표시. */
   showUnreadable(bonus = 0): void {
-    this.showPredictionResult('unreadable')
-    if (bonus > 0) this.anomalyReadout.textContent = `UNREADABLE 보너스 +${bonus.toLocaleString()}`
+    if (bonus <= 0) return
+    let reward = this.report.querySelector<HTMLDivElement>('.report-unreadable')
+    if (!reward) {
+      reward = document.createElement('div')
+      reward.className = 'report-unreadable'
+      this.report.appendChild(reward)
+    }
+    reward.textContent = `UNREADABLE · 점수 +${bonus.toLocaleString()}`
   }
 
-  /** 예측 파괴 보상 — 청백 EMP 펄스와 점수 보너스. */
-  showAnomalyEmp(bonus: number): void {
+  /** 예측 파괴 보상 — 원인과 효과는 예측 카드에, 화면에는 청백 펄스만 표시. */
+  showAnomalyEmp(bonus: number, target: PredictionTarget): void {
     clearTimeout(this.empTimer)
-    $<HTMLSpanElement>('anomaly-bonus').textContent = `+${Math.max(0, Math.round(bonus)).toLocaleString()} SCORE`
+    const safeBonus = Math.max(0, Math.round(bonus)).toLocaleString()
+    this.anomalyReadout.textContent =
+      `EMP 발동 · ${EMP_GOALS[target]} 성공 · 적탄 제거·일반 적 1.25초 기절 · 점수 +${safeBonus}`
+    this.anomalyProgress.setAttribute('aria-valuenow', '100')
+    this.anomalyProgress.setAttribute('aria-valuetext', this.anomalyReadout.textContent)
+    this.anomalyProgressBar.style.width = '100%'
+    this.prediction.classList.add('is-broken')
     this.anomalyEmp.className = ''
     void this.anomalyEmp.offsetWidth
     this.anomalyEmp.classList.add('emp-active')
@@ -376,12 +331,10 @@ export class Hud {
     this.upgradeCleanup = undefined
   }
 
-  /** 새 판 시작 시 이전 판의 비동기 스캔·중앙 판정·EMP 잔상을 모두 정리. */
+  /** 새 판 시작 시 이전 판의 예측·EMP 잔상을 모두 정리. */
   resetTransient(): void {
     this.showPrediction(null)
-    clearTimeout(this.resultTimer)
     clearTimeout(this.empTimer)
-    this.predictionResult.className = 'hidden'
     this.anomalyEmp.className = 'hidden'
   }
 

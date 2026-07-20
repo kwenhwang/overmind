@@ -69,6 +69,10 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   margin-top: 8px; padding-top: 8px; border-top: 1px dashed #1e3a4a;
   color: #c084fc; font-style: italic; font-size: 13px;
 }
+#report .report-unreadable {
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid rgba(192,132,252,.36);
+  color: #e9d5ff; font-weight: 800;
+}
 #report .report-counter {
   margin-top: 9px; padding-top: 9px; border-top: 1px solid #3a2a1a;
   color: #ffcf8f; font-weight: 700; font-size: 16px;
@@ -262,93 +266,22 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 #prediction.is-unreadable #anomaly-progress-bar { background: linear-gradient(90deg, #a855f7, #e9d5ff); }
 @keyframes prediction-glint { 0%, 55% { transform: translateX(-100%); } 85%, 100% { transform: translateX(100%); } }
 
-/* ── 인터미션 행동 스캔 극장 ────────────────────────────────────────── */
-#prediction-scan {
-  position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0;
-  background: radial-gradient(circle at center, rgba(11,39,53,.24), rgba(3,7,12,.76));
-}
-#prediction-scan.scan-active { opacity: 1; animation: scan-enter .18s ease-out both; }
-#prediction-scan.scan-out { opacity: 0; transition: opacity .2s ease-in; }
-.scan-grid {
-  position: absolute; inset: -20%; opacity: .28;
-  background-image: linear-gradient(rgba(34,211,238,.13) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,.13) 1px, transparent 1px);
-  background-size: 54px 54px; transform: perspective(500px) rotateX(58deg) translateY(12%);
-}
-.scan-sweep {
-  position: absolute; left: 0; right: 0; height: 2px; top: 8%;
-  background: linear-gradient(90deg, transparent, #67e8f9, transparent); box-shadow: 0 0 18px #22d3ee;
-  animation: scan-sweep 1.2s linear infinite;
-}
-.scan-zone { position: absolute; opacity: 0; transition: opacity .25s, transform .35s; }
-.scan-left, .scan-right { top: 14%; bottom: 14%; width: 42%; border: 1px solid rgba(103,232,249,.22); }
-.scan-left { left: 5%; background: linear-gradient(90deg, rgba(34,211,238,.2), transparent); transform: translateX(-4%); }
-.scan-right { right: 5%; background: linear-gradient(-90deg, rgba(34,211,238,.2), transparent); transform: translateX(4%); }
-.scan-center {
-  left: 50%; top: 50%; width: min(34vw, 340px); aspect-ratio: 1; transform: translate(-50%,-50%) scale(.75);
-  border: 2px solid rgba(103,232,249,.7); border-radius: 50%; box-shadow: inset 0 0 50px rgba(34,211,238,.13), 0 0 24px rgba(34,211,238,.22);
-}
-.scan-edge { inset: 8%; border: 20px solid rgba(34,211,238,.1); outline: 2px solid rgba(103,232,249,.55); transform: scale(1.04); }
-.scan-player {
-  left: 50%; top: 50%; width: 110px; height: 110px; transform: translate(-50%,-50%) scale(.65);
-  border: 2px dashed #67e8f9; border-radius: 50%; box-shadow: 0 0 35px rgba(34,211,238,.35);
-}
-.scan-player span { position: absolute; inset: 28%; border: 2px solid #fff; transform: rotate(45deg); }
-#prediction-scan.target-acquired[data-target='dodge_left'] .scan-left,
-#prediction-scan.target-acquired[data-target='dodge_right'] .scan-right,
-#prediction-scan.target-acquired[data-target='center'] .scan-center,
-#prediction-scan.target-acquired[data-target='edge'] .scan-edge,
-#prediction-scan.target-acquired[data-target='melee'] .scan-player,
-#prediction-scan.target-acquired[data-target='ranged'] .scan-player { opacity: 1; transform: translate(0) scale(1); }
-#prediction-scan.target-acquired[data-target='center'] .scan-center,
-#prediction-scan.target-acquired[data-target='melee'] .scan-player,
-#prediction-scan.target-acquired[data-target='ranged'] .scan-player { transform: translate(-50%,-50%) scale(1); }
-#prediction-scan.target-acquired[data-target='ranged'] .scan-player { width: 260px; height: 260px; border-style: solid; }
-#prediction-scan.target-acquired[data-target='unreadable'] .scan-grid { animation: unreadable-grid .14s steps(2) 4; }
-.scan-copy {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(580px, 88vw);
-  padding: 20px; text-align: center; text-shadow: 0 0 18px rgba(34,211,238,.7);
-}
-#scan-kicker { color: #67e8f9; font-size: 12px; letter-spacing: .42em; margin-bottom: 10px; }
-#scan-label { display: block; color: #f0fdff; font-size: clamp(24px, 4vw, 44px); letter-spacing: .06em; }
-#scan-detail { display: block; margin-top: 9px; color: #9ac1d1; font-size: 13px; letter-spacing: .12em; }
-.prediction-locked .scan-copy { animation: lock-punch .34s ease-out; }
-.prediction-locked #scan-kicker { color: #fff; }
-@keyframes scan-enter { from { opacity: 0; } to { opacity: 1; } }
-@keyframes scan-sweep { from { top: 8%; } to { top: 92%; } }
-@keyframes lock-punch { 0% { transform: translate(-50%,-50%) scale(1.18); filter: brightness(2); } 100% { transform: translate(-50%,-50%) scale(1); } }
-@keyframes unreadable-grid { 50% { opacity: .05; transform: perspective(500px) rotateX(58deg) translate(2%, 12%); } }
-
-/* ── 판정·EMP 보상 ─────────────────────────────────────────────────── */
-#prediction-result {
-  position: fixed; left: 50%; top: 27%; z-index: 8; transform: translate(-50%,-50%);
-  width: max-content; max-width: 90vw; padding: 10px 20px; text-align: center;
-  color: #ecfeff; border: 1px solid #67e8f9; background: rgba(4,18,27,.9);
-  font-size: clamp(15px, 2.4vw, 22px); font-weight: 900; letter-spacing: .2em; opacity: 0;
-}
-#prediction-result.show { opacity: 1; animation: result-slam 1.8s ease-out both; }
-#prediction-result.result-followed { color: #fca5a5; border-color: #ef4444; }
-#prediction-result.result-unreadable { color: #e9d5ff; border-color: #c084fc; }
+/* ── EMP 보상 파동 ─────────────────────────────────────────────────── */
 #anomaly-emp {
-  position: fixed; inset: 0; z-index: 9; display: grid; place-content: center; gap: 6px;
-  pointer-events: none; text-align: center; color: #ecfeff;
+  position: fixed; inset: 0; z-index: 9; pointer-events: none;
 }
 #anomaly-emp::before {
   content: ''; position: absolute; inset: 0; opacity: 0;
   background: radial-gradient(circle, rgba(236,254,255,.6), rgba(34,211,238,.18) 25%, transparent 64%);
 }
-#anomaly-emp strong { z-index: 1; font-size: clamp(34px, 8vw, 78px); letter-spacing: .14em; text-shadow: 0 0 26px #67e8f9; }
-#anomaly-emp span { z-index: 1; color: #a5f3fc; font-size: 18px; font-weight: 800; letter-spacing: .2em; }
 .emp-ring {
   position: absolute; left: 50%; top: 50%; width: 100px; height: 100px; transform: translate(-50%,-50%);
   border: 4px solid rgba(207,250,254,.9); border-radius: 50%; opacity: 0;
 }
 #anomaly-emp.emp-active::before { animation: emp-flash .65s ease-out; }
 #anomaly-emp.emp-active .emp-ring { animation: emp-ring .85s ease-out; }
-#anomaly-emp.emp-active strong, #anomaly-emp.emp-active span { animation: emp-copy 1.4s ease-out both; }
-@keyframes result-slam { 0% { opacity: 0; transform: translate(-50%,-50%) scale(1.4); } 12%, 70% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 100% { opacity: 0; } }
 @keyframes emp-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes emp-ring { 0% { opacity: 1; width: 80px; height: 80px; } 100% { opacity: 0; width: 140vmax; height: 140vmax; border-width: 1px; } }
-@keyframes emp-copy { 0% { opacity: 0; transform: scale(1.45); } 12%, 68% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.96); } }
 
 /* ── 즉시 보이는 브랜드 부팅 화면 ─────────────────────────────────── */
 #screen::before {
@@ -417,13 +350,11 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #screen h1 { font-size: 27px; }
   #screen p { max-width: 94vw; }
   #screen-btn { padding: 11px 32px; }
-  #prediction-result { letter-spacing: .1em; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #hp-bar, #boss-bar, #anomaly-progress-bar, #prediction-scan, .scan-zone { transition-duration: .01ms; }
-  #prediction::after, .scan-sweep, .brand-sigil, .boot-status { animation: none; }
-  #prediction-result.show, #anomaly-emp.emp-active::before, #anomaly-emp.emp-active .emp-ring,
-  #anomaly-emp.emp-active strong, #anomaly-emp.emp-active span, .prediction-locked .scan-copy,
+  #hp-bar, #boss-bar, #anomaly-progress-bar { transition-duration: .01ms; }
+  #prediction::after, .brand-sigil, .boot-status { animation: none; }
+  #anomaly-emp.emp-active::before, #anomaly-emp.emp-active .emp-ring,
   #report .report-counter.reveal, .combo, .dmg, #hit-flash.on { animation-duration: .01ms; animation-iteration-count: 1; }
 }
