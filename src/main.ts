@@ -4,18 +4,21 @@ import { initSession } from './ai/director'
 import { GAME_VERSION } from './game/config'
 
 const params = new URLSearchParams(location.search)
+const debugMode = params.has('debug')
+
+// 일반 화면에는 게임 버전을, 디버그 화면에는 빌드 식별자까지 표시한다.
+const ver = document.createElement('div')
+ver.id = 'ver'
+ver.textContent = debugMode ? `${GAME_VERSION} · ${__BUILD__}` : GAME_VERSION
+ver.setAttribute('aria-hidden', 'true')
+document.body.appendChild(ver)
 
 // 세션 발급은 게임 준비를 절대 막지 않는다. 토큰이 늦거나 없어도 디렉터 폴백으로 진행.
 void initSession().catch(() => undefined)
 
-// 진단·빌드 정보는 일반 플레이에서는 숨기고 ?debug에서만 노출.
-if (params.has('debug')) {
+// 진단 기능은 ?debug에서만 노출.
+if (debugMode) {
   document.getElementById('diag-btn')?.classList.remove('hidden')
-  const ver = document.createElement('div')
-  ver.id = 'ver'
-  ver.textContent = `${GAME_VERSION} · ${__BUILD__}`
-  ver.setAttribute('aria-hidden', 'true')
-  document.body.appendChild(ver)
 }
 
 // 모델이 하나도 로드되지 않아도 절차 도형 폴백으로 Game은 반드시 생성한다.
