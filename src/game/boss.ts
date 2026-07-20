@@ -39,6 +39,8 @@ export class Boss {
   /** 페이즈 전환 무적 (연출 + 미니언 스폰 타이밍) */
   private invulnTimer = 0
   private attackCooldown = 2
+  /** 각 페이즈의 첫 공격에 설계된 시그니처를 한 번만 강제한다. */
+  private signatureOpenedPhase = -1
   private chargeState: 'none' | 'windup' | 'dash' = 'none'
   private chargeTimer = 0
   private chargeDir = new THREE.Vector3()
@@ -282,7 +284,9 @@ export class Boss {
 
   private beginAttack(player: Player, projectiles: ProjectilePool): void {
     const dist = this.pos.distanceTo(player.pos)
-    const attack = this.chooseAttack(dist) // 상황 판단(거리) + 시그니처 가중치
+    const isPhaseOpener = this.signatureOpenedPhase !== this.phaseIndex
+    const attack = isPhaseOpener ? (this.phase.attack as BossAttack) : this.chooseAttack(dist)
+    if (isPhaseOpener) this.signatureOpenedPhase = this.phaseIndex
     const cd = BOSS.ai.cooldownMul[Math.min(this.phaseIndex, BOSS.ai.cooldownMul.length - 1)] // 후반 촘촘
     // 공격 애니: 원거리 탄막은 사격(Shoot), 근접/돌진은 공격(Attack) 클립
     this.attackClip = attack === 'radial_burst' ? this.clips.shoot : this.clips.attack

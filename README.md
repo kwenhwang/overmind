@@ -11,6 +11,7 @@
 - **웹에서 바로 플레이**: https://kwenhwang.github.io/overmind/
 - 조작: `WASD`/방향키 이동 · **좌클릭**(또는 `K`/`J`) 원거리 사격 · **우클릭**(또는 `Space`/`Shift`) 대시(무적) · 근접은 밀착 시 자동. 모바일은 조준·사격·근접 전부 자동, 이동·대시만.
 - 웨이브 11개를 버티고 최종 보스를 파괴하면 승리. 같은 패턴을 반복하면 오버마인드가 반드시 처벌한다.
+- 오버마인드는 다음 행동을 공개 예측한다. 충분한 근거를 쌓아 반대로 행동하면 **ANOMALY EMP**가 발동해 적 탄환을 지우고 적을 기절시킨다.
 
 ## 구조
 
@@ -30,6 +31,7 @@ docs/       AI 활용 기술 문서
 
 ```bash
 npm install && npm run dev          # 게임 (http://localhost:5173)
+npm test                            # 예측·텔레메트리·디렉터 가드레일 테스트
 cd server && npm install && npm run dev  # LLM 프록시 (OPENAI_API_KEY 권장 · ANTHROPIC_API_KEY도 지원, 없으면 폴백 동작)
 ```
 

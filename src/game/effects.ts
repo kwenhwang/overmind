@@ -7,6 +7,8 @@ interface Particle {
   maxLife: number
   /** 고스트류 — 중력·이동 없이 제자리에서 페이드 */
   still?: boolean
+  /** EMP 파동처럼 수명 동안 균일하게 확장하는 속도 */
+  grow?: number
 }
 
 interface ArcFx {
@@ -106,6 +108,36 @@ export class Effects {
     this.arcs.push({ mesh, life: 0.14 })
   }
 
+  /** ANOMALY EMP — 청백색 바닥 파동과 파편, 짧은 충격을 한 번에 재생한다. */
+  emp(pos: THREE.Vector3): void {
+    const wave = new THREE.Mesh(
+      new THREE.RingGeometry(0.7, 1, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x67e8f9,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    wave.rotation.x = -Math.PI / 2
+    wave.position.copy(pos).setY(0.09)
+    wave.scale.setScalar(0.25)
+    this.scene.add(wave)
+    this.particles.push({
+      mesh: wave,
+      vel: new THREE.Vector3(),
+      life: 0.65,
+      maxLife: 0.65,
+      still: true,
+      grow: 12,
+    })
+    this.burst(pos, 0xa5f3fc, 24, 12)
+    this.hitstop(0.1)
+    this.shake(0.65)
+  }
+
   /** 떠오르는 데미지 숫자 (DOM — 저사양에서도 선명) */
   damageNumber(worldPos: THREE.Vector3, text: string, cls = ''): void {
     const v = worldPos.clone().setY(1.6).project(this.camera)
@@ -161,6 +193,7 @@ export class Effects {
           p.vel.y = Math.abs(p.vel.y) * 0.4
         }
       }
+      if (p.grow) p.mesh.scale.addScalar(p.grow * dt)
       ;(p.mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(1, p.life / (p.maxLife * 0.5))
     }
     for (let i = this.arcs.length - 1; i >= 0; i--) {

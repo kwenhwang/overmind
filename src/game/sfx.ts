@@ -109,6 +109,12 @@ export const sfx = {
     s.tone(392, 0.22, { type: 'square', volume: 0.35, delay: 0.24 })
   },
   taunt: () => logEvent('taunt') || s.tone(1200, 0.05, { type: 'sine', slideTo: 1600, volume: 0.15 }),
+  anomaly: () => {
+    if (logEvent('anomaly')) return
+    s.noise(0.32, { volume: 0.35, filterFrom: 5000, filterTo: 180 })
+    s.tone(110, 0.42, { type: 'sawtooth', slideTo: 880, volume: 0.38 })
+    s.tone(440, 0.28, { type: 'sine', slideTo: 1760, volume: 0.24, delay: 0.08 })
+  },
   victory: () => {
     if (logEvent('victory')) return
     ;[262, 330, 392, 523].forEach((f, i) => s.tone(f, 0.22, { type: 'triangle', volume: 0.35, delay: i * 0.13 }))

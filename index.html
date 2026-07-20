@@ -8,34 +8,64 @@
   <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
 <body>
-  <canvas id="game"></canvas>
+  <canvas id="game" aria-label="OVERMIND 전투 아레나"></canvas>
   <div id="vignette"></div>
   <div id="hit-flash"></div>
-  <div id="hud">
-    <div id="hp-wrap"><div id="hp-bar"></div></div>
+  <div id="hud" class="screen-open">
+    <div id="hp-wrap" role="progressbar" aria-label="플레이어 체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="hp-bar"></div></div>
     <div id="wave-label"></div>
     <div id="boss-wrap" class="hidden">
       <div id="boss-name"></div>
-      <div id="boss-bar-bg"><div id="boss-bar"></div></div>
+      <div id="boss-bar-bg" role="progressbar" aria-label="보스 체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="boss-bar"></div></div>
     </div>
-    <div id="taunt" class="hidden"></div>
+    <div id="taunt" class="hidden" aria-live="polite"></div>
     <div id="intermission" class="hidden"></div>
     <div id="report" class="hidden"></div>
     <div id="upgrades" class="hidden"></div>
-    <div id="score"></div>
+    <section id="prediction" class="hidden" aria-label="오버마인드 예측">
+      <div class="prediction-kicker">OVERMIND PREDICTION</div>
+      <div id="prediction-label"></div>
+      <div id="prediction-source"></div>
+      <div id="anomaly-readout" aria-live="polite">분석 대기</div>
+      <div id="anomaly-progress" role="progressbar" aria-label="예측 탈피 진행도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="anomaly-progress-bar"></div>
+      </div>
+    </section>
+    <div id="score" aria-live="polite"></div>
     <div id="numbers"></div>
     <div id="joy-base" class="hidden"><div id="joy-knob"></div></div>
-    <button id="diag-btn" title="화면이 이상하면 눌러 개발자에게 전송">진단 전송</button>
+    <button id="diag-btn" class="hidden" title="화면이 이상하면 눌러 개발자에게 전송">진단 전송</button>
   </div>
-  <div id="screen" class="hidden">
-    <h1 id="screen-title"></h1>
-    <p id="screen-desc"></p>
+  <div id="prediction-scan" class="hidden" aria-hidden="true">
+    <div class="scan-grid"></div>
+    <div class="scan-sweep"></div>
+    <div class="scan-zone scan-left"></div>
+    <div class="scan-zone scan-right"></div>
+    <div class="scan-zone scan-center"></div>
+    <div class="scan-zone scan-edge"></div>
+    <div class="scan-zone scan-player"><span></span></div>
+    <div class="scan-copy">
+      <div id="scan-kicker">BEHAVIORAL SCAN</div>
+      <strong id="scan-label">관찰 데이터 동기화</strong>
+      <span id="scan-detail"></span>
+    </div>
+  </div>
+  <div id="prediction-result" class="hidden" role="status" aria-live="assertive"></div>
+  <div id="anomaly-emp" class="hidden" role="status" aria-live="assertive">
+    <div class="emp-ring"></div>
+    <strong>ANOMALY EMP</strong>
+    <span id="anomaly-bonus"></span>
+  </div>
+  <div id="screen" class="booting" role="dialog" aria-modal="true" aria-busy="true">
+    <div class="brand-sigil" aria-hidden="true"><span></span></div>
+    <h1 id="screen-title">OVERMIND</h1>
+    <p id="screen-desc">적응형 전투 지능이 아레나를 구성 중입니다.<br><span class="boot-status">BEHAVIORAL CORE ONLINE</span></p>
     <div id="board-wrap" class="hidden">
       <div id="board-name-row"><span>이름</span><input id="name-input" maxlength="12" placeholder="플레이어"><button id="name-save">등록</button></div>
       <ol id="board-list"></ol>
     </div>
     <label id="easy-label"><input type="checkbox" id="easy-toggle"> 쉬운 조작 (자동 조준·사격 · 점수 ½·랭킹 분리)</label>
-    <button id="screen-btn">START</button>
+    <button id="screen-btn" disabled>START</button>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

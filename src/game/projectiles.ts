@@ -60,4 +60,11 @@ export class ProjectilePool {
     for (const p of this.list) this.scene.remove(p.mesh)
     this.list.length = 0
   }
+
+  clearEnemyProjectiles(): void {
+    for (const projectile of this.list) {
+      if (!projectile.fromPlayer) projectile.dead = true
+    }
+    this.sweep()
+  }
 }

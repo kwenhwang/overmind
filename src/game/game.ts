@@ -14,11 +14,16 @@ import { Hazard, resolveHazardPos } from './hazards'
 import { Effects } from './effects'
 import { sfx } from './sfx'
 import { events } from './events'
-import { Telemetry } from '../ai/telemetry'
-import { requestWaveDesign, requestBossDesign, fallbackDesign, memory, uploadDiag, uploadRL, submitScore, fetchLeaderboard } from '../ai/director'
+import { Telemetry, buildPredictionContract, evaluatePrediction } from '../ai/telemetry'
+import {
+  requestOpeningDesign, requestWaveDesign, requestBossDesign, fallbackDesign, fallbackBossDesign,
+  memory, uploadDiag, uploadRL, submitScore, fetchLeaderboard,
+} from '../ai/director'
 import { Recorder } from './recorder'
 import { pickThree } from './upgrades'
-import type { BossDesign, BossPhase, TelemetryDigest, WaveDesign } from '../ai/schema'
+import type {
+  AnomalyEvaluation, BossDesign, BossPhase, PredictionContract, TelemetryDigest, WaveDesign,
+} from '../ai/schema'
 import { Hud } from '../ui/hud'
 
 type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | 'victory'
@@ -62,8 +67,20 @@ export class Game {
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
+  private pendingPrediction: PredictionContract | null = null
+  private activePrediction: PredictionContract | null = null
+  private anomalyTriggered = false
+  private combatStarted = false
+  private pendingWaveClear = false
+  private runId = 0
+  private openingRequestController: AbortController | null = null
+  private waveRequestController: AbortController | null = null
+  private bossRequestController: AbortController | null = null
+  private endRunLocked = false
   /** 이 웨이브에 대해 다음 설계를 이미 프리페치했는지 (중복 요청 방지) */
   private prefetchedWave = -1
+  private prefetchedDigest: TelemetryDigest | null = null
+  private prefetchedPrediction: PredictionContract | null = null
   /** 현재 웨이브에 스폰된 적 수 (프리페치 트리거 임계 계산용) */
   private waveEnemyCount = 0
   private pendingSpawn: PendingSpawn | null = null
@@ -104,10 +121,10 @@ export class Game {
             return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
           }).length,
           boss: !!this.boss,
-          nearest: this.enemies[0] ? Math.round(this.enemies[0].pos.distanceTo(this.player.pos)) : -1,
-          hp: this.player.hp,
+          nearest: this.enemies[0] && this.player ? Math.round(this.enemies[0].pos.distanceTo(this.player.pos)) : -1,
+          hp: this.player?.hp ?? null,
           wave: this.wave,
-          damage: this.player.damageBySource, // 피해 출처별 누적 — 개발자 분석용
+          damage: this.player?.damageBySource ?? {}, // 피해 출처별 누적 — 개발자 분석용
         }
         const ok = await uploadDiag(cap)
         diagBtn.textContent = ok ? '전송됨 ✓' : '전송 실패'
@@ -121,59 +138,58 @@ export class Game {
     events.on('lungeWarn', () => sfx.lungeWarn())
     events.on('spitterShot', () => sfx.shoot())
 
-    // 헤드리스 검증용 상태 훅 (콘솔 출력 없음)
-    ;(window as unknown as Record<string, unknown>).__dbg = () => ({
-      state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
-      hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
-      boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
-      design: this.pendingDesign
-        ? { bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
-        : null,
-      prefetchedWave: this.prefetchedWave,
-      dodge: this.telemetry.debugDodge(),
-      nearest: this.enemies.length ? Math.round(this.findNearestEnemy()?.pos.distanceTo(this.player.pos) ?? -1) : -1,
-      proj: this.projectiles.list.length,
-      nearestScreen: (() => {
-        const e = this.findNearestEnemy()
-        if (!e) return null
-        const v = e.pos.clone().project(this.world.camera)
-        return { x: Math.round(((v.x + 1) / 2) * innerWidth), y: Math.round(((1 - v.y) / 2) * innerHeight) }
-      })(),
-      onScreen: this.enemies.filter((e) => {
-        const v = e.pos.clone().project(this.world.camera)
-        return v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1 && v.z < 1
-      }).length,
-      // 분대 스태거·반사회피 검증용 카운트
-      permits: this.enemies.filter((e) => !e.dead && e.attackPermit).length,
-      dodging: this.enemies.filter((e) => !e.dead && e.isDodging).length,
-      // 포위 진단: 살아있는 근접 적의 플레이어 기준 각도(도) — 무리 전술 확산 검증·튜닝용
-      encAngles: this.enemies
-        .filter((e) => !e.dead && e.type !== 'spitter')
-        .map((e) => Math.round((Math.atan2(e.pos.z - this.player.pos.z, e.pos.x - this.player.pos.x) * 180) / Math.PI)),
-    })
-    // 검증·촬영용: 보스 즉사 (페이즈 강제 진행 포함 — 반복 호출)
-    ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
-    // 검증용: 보스 예측 조준 확인 — moveDir +x일 때 예측 지점이 플레이어보다 앞(오른쪽)이면 리드 작동
-    ;(window as unknown as Record<string, unknown>).__bossDbg = () =>
-      this.boss
-        ? {
-            hp: Math.round(this.boss.hp),
-            phase: this.boss.phaseIndex,
-            habitBias: Number(this.boss.habitBias.toFixed(2)),
-            playerX: Number(this.player.pos.x.toFixed(2)),
-            predMoveRight: this.boss.debugPredict(this.player, 1, 0),
-          }
-        : null
-    // 검증용: 임의 텔레메트리 → 카운터 설계 (인과 보장 레이어 확인)
-    ;(window as unknown as Record<string, unknown>).__designFor = (d: TelemetryDigest) => fallbackDesign(d)
-    // 검증용: 근접 적 N기를 원형으로 스폰 (무리 전술 포위 확산 확인)
-    ;(window as unknown as Record<string, unknown>).__spawnRing = (type = 'drone', n = 6, mods: string[] = []) => {
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2
-        const pos = new THREE.Vector3(Math.cos(a) * 10, 0, Math.sin(a) * 10)
-        const e = new Enemy(type as EnemyType, pos, this.world.scene, mods as never)
-        e.aggression = 4
-        this.enemies.push(e)
+    // 치트성 검증 훅은 개발 서버·로컬 프리뷰에서만 노출한다.
+    const allowDebugHooks = import.meta.env.DEV || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    if (allowDebugHooks) {
+      ;(window as unknown as Record<string, unknown>).__dbg = () => ({
+        state: this.state, wave: this.wave, timer: this.intermissionTimer.toFixed(2),
+        hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
+        boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
+        design: this.pendingDesign
+          ? { bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
+          : null,
+        prefetchedWave: this.prefetchedWave,
+        dodge: this.telemetry.debugDodge(),
+        nearest: this.enemies.length && this.player ? Math.round(this.findNearestEnemy()?.pos.distanceTo(this.player.pos) ?? -1) : -1,
+        proj: this.projectiles.list.length,
+        nearestScreen: (() => {
+          const enemy = this.findNearestEnemy()
+          if (!enemy) return null
+          const view = enemy.pos.clone().project(this.world.camera)
+          return { x: Math.round(((view.x + 1) / 2) * innerWidth), y: Math.round(((1 - view.y) / 2) * innerHeight) }
+        })(),
+        onScreen: this.enemies.filter((enemy) => {
+          const view = enemy.pos.clone().project(this.world.camera)
+          return view.x > -1 && view.x < 1 && view.y > -1 && view.y < 1 && view.z < 1
+        }).length,
+        permits: this.enemies.filter((enemy) => !enemy.dead && enemy.attackPermit).length,
+        dodging: this.enemies.filter((enemy) => !enemy.dead && enemy.isDodging).length,
+        encAngles: this.player
+          ? this.enemies
+              .filter((enemy) => !enemy.dead && enemy.type !== 'spitter')
+              .map((enemy) => Math.round((Math.atan2(enemy.pos.z - this.player.pos.z, enemy.pos.x - this.player.pos.x) * 180) / Math.PI))
+          : [],
+      })
+      ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
+      ;(window as unknown as Record<string, unknown>).__bossDbg = () =>
+        this.boss
+          ? {
+              hp: Math.round(this.boss.hp),
+              phase: this.boss.phaseIndex,
+              habitBias: Number(this.boss.habitBias.toFixed(2)),
+              playerX: Number(this.player.pos.x.toFixed(2)),
+              predMoveRight: this.boss.debugPredict(this.player, 1, 0),
+            }
+          : null
+      ;(window as unknown as Record<string, unknown>).__designFor = (digest: TelemetryDigest) => fallbackDesign(digest)
+      ;(window as unknown as Record<string, unknown>).__spawnRing = (type = 'drone', count = 6, mods: string[] = []) => {
+        for (let index = 0; index < count; index++) {
+          const angle = (index / count) * Math.PI * 2
+          const pos = new THREE.Vector3(Math.cos(angle) * 10, 0, Math.sin(angle) * 10)
+          const enemy = new Enemy(type as EnemyType, pos, this.world.scene, mods as never)
+          enemy.aggression = 4
+          this.enemies.push(enemy)
+        }
       }
     }
 
@@ -201,6 +217,21 @@ export class Game {
   }
 
   private startRun(): void {
+    this.hud.resetTransient()
+    this.hud.beginGameplay()
+    this.runId++
+    this.openingRequestController?.abort()
+    this.waveRequestController?.abort()
+    this.bossRequestController?.abort()
+    this.openingRequestController = null
+    this.waveRequestController = null
+    this.bossRequestController = null
+    this.endRunLocked = false
+    this.combatStarted = false
+    this.pendingWaveClear = false
+    this.pendingPrediction = null
+    this.activePrediction = null
+    this.anomalyTriggered = false
     this.easy = easyMode() // 타이틀 토글 반영
     this.scoreMul = this.easy ? 0.5 : 1
     this.rl = RL_MODE ? new Recorder() : null
@@ -215,18 +246,22 @@ export class Game {
     this.bossDesign = null
     this.bossDeathTimer = -1
     this.prefetchedWave = -1
+    this.prefetchedDigest = null
+    this.prefetchedPrediction = null
     this.waveEnemyCount = 0
     this.upgradePending = false
     this.scoreSubmitted = false
     this.hud.hideBossBar()
     this.hud.hideUpgrades()
     this.hud.hideLeaderboard()
+    this.hud.showPrediction(null)
+    this.hud.setAnomalyProgress(null)
     this.world.setCoreVisible(true)
     if (this.player) this.world.scene.remove(this.player.mesh)
 
     this.player = new Player(this.world.scene)
     this.player.onDash = (dir) => {
-      this.telemetry.recordDash(dir)
+      if (this.state === 'playing' && this.combatStarted) this.telemetry.recordDash(dir)
       sfx.dash()
       this.world.ripple(this.player.pos) // 대시 파동 — 바닥이 반응
       // mirror_dash 모디파이어: 오버마인드가 회피 자체에 반응한다
@@ -245,23 +280,70 @@ export class Game {
       this.startBossIntro()
       return
     }
-    this.startIntermission()
+    const openingDigest = this.telemetry.waveDigest(0, this.player.hpPct)
+    const rememberedProfile = memory.profile().trim()
+    const isReturning = rememberedProfile.length > 0 || memory.runContext().lastOutcome !== 'none'
+    this.pendingDesign = fallbackDesign(openingDigest)
+    this.startWave()
+    if (isReturning) {
+      if (rememberedProfile) {
+        const memoryLine = rememberedProfile.split(/(?<=[.!?…。])\s/)[0].slice(0, 90)
+        this.hud.showTaunt(`기억하고 있다. ${memoryLine}`, 5)
+      }
+      this.requestOpeningGreeting(openingDigest)
+    }
+  }
+
+  /** W1은 즉시 시작하고, 판간 기억을 반영한 복귀 인사만 백그라운드 응답에서 소비한다. */
+  private requestOpeningGreeting(digest: TelemetryDigest): void {
+    const controller = new AbortController()
+    const runId = this.runId
+    this.openingRequestController = controller
+    void requestOpeningDesign(digest, controller.signal).then((design) => {
+      if (
+        !design || controller.signal.aborted || runId !== this.runId ||
+        this.state !== 'playing' || this.wave !== 1
+      ) return
+      this.hud.showTaunt(design.taunt, 5)
+      sfx.taunt()
+    }).finally(() => {
+      if (this.openingRequestController === controller) this.openingRequestController = null
+    })
   }
 
   /** 웨이브 사이 — 오버마인드가 다음 판을 설계하는 시간 (LLM 지연 흡수 구간) */
   private startIntermission(): void {
+    this.finishWaveObservation()
     this.state = 'intermission'
     this.intermissionTimer = WAVE_INTERMISSION_SEC
     // pendingDesign은 프리페치가 채웠을 수 있으므로 여기서 지우지 않는다 (재요청 시 else에서 초기화)
     this.clearHazards()
+    this.projectiles.clear()
     this.hud.showIntermission('OVERMIND 재구성 중…')
 
-    const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+    const evidence = this.telemetry.currentEvidence()
+    const finalDigest = this.telemetry.waveDigest(this.wave, this.player.hpPct)
+    const prefetchDigest = this.prefetchedDigest
+    const hasPrefetchSnapshot = this.prefetchedWave === this.wave && prefetchDigest !== null
+    const digest = hasPrefetchSnapshot ? prefetchDigest : finalDigest
+    this.pendingPrediction = hasPrefetchSnapshot
+      ? this.prefetchedPrediction
+      : buildPredictionContract(this.wave, evidence)
     this.hud.showReport(digest, memory.profile()) // 오버마인드가 "본 것"과 "기억"을 노출
-    if (this.wave === 0) {
-      // 첫 웨이브: 아직 관측 데이터가 없어 LLM이 할 일이 없음 → 폴백 즉시 (게임 시작 지연 방지)
-      this.pendingDesign = fallbackDesign(digest)
-    } else if (this.prefetchedWave === this.wave) {
+    this.hud.showPrediction(this.pendingPrediction)
+    if (this.pendingPrediction) {
+      const runId = this.runId
+      void this.hud.playPredictionScan(this.pendingPrediction).then(() => {
+        if (runId !== this.runId || this.state !== 'intermission') return
+        if (this.pendingPrediction?.target === 'unreadable') {
+          const bonus = Math.round(200 * this.wave * this.scoreMul)
+          this.score += bonus
+          this.hud.setScore(this.score, this.combo)
+          this.hud.showUnreadable(bonus)
+        }
+      })
+    }
+    if (this.prefetchedWave === this.wave) {
       // 전투 중 프리페치가 이미 이 웨이브의 설계를 받았으면 그대로 사용 (LLM 대사 노출)
       if (this.pendingDesign) this.hud.showCounter(this.pendingDesign.counterReason)
     } else {
@@ -295,26 +377,48 @@ export class Game {
 
   /** 웨이브 설계 요청 (프리페치·인터미션 공용). 도착 시 pendingDesign 갱신 + 인터미션이면 카운터 노출 */
   private requestDesign(digest: TelemetryDigest): void {
-    requestWaveDesign(digest).then((design) => {
+    this.waveRequestController?.abort()
+    const controller = new AbortController()
+    const runId = this.runId
+    const sourceWave = digest.wave
+    this.waveRequestController = controller
+    void requestWaveDesign(digest, controller.signal).then((design) => {
+      if (
+        !design || controller.signal.aborted || runId !== this.runId || this.wave !== sourceWave ||
+        (this.state !== 'playing' && this.state !== 'intermission')
+      ) return
       this.pendingDesign = design
       if (this.state === 'intermission') this.hud.showCounter(design.counterReason)
+    }).finally(() => {
+      if (this.waveRequestController === controller) this.waveRequestController = null
     })
   }
 
   private startWave(): void {
-    const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+    const prefetchedDigest = this.prefetchedWave === this.wave ? this.prefetchedDigest : null
+    const digest = prefetchedDigest ?? this.telemetry.waveDigest(this.wave, this.player.hpPct)
     const design = this.pendingDesign ?? fallbackDesign(digest)
+    this.waveRequestController?.abort()
+    this.waveRequestController = null
     this.pendingDesign = null // 소비 후 즉시 비움 — 다음 웨이브가 직전 stale 설계를 재사용하던 버그 차단
+    this.activePrediction = this.pendingPrediction
+    this.pendingPrediction = null
+    this.prefetchedDigest = null
+    this.prefetchedPrediction = null
+    this.anomalyTriggered = false
+    this.pendingWaveClear = false
     this.wave++
     this.state = 'playing'
     this.hud.hideIntermission()
     this.hud.hideReport()
     this.hud.hideUpgrades()
     this.hud.setWave(this.wave, TOTAL_WAVES)
+    this.hud.showPrediction(this.activePrediction)
+    this.hud.setAnomalyProgress(null)
     this.hud.showTaunt(design.taunt)
     sfx.taunt()
-    this.telemetry.resetWaveStats()
     this.telemetry.startWave()
+    this.combatStarted = false
     this.world.setMood(design.mood)
 
     // 해저드 — 텔레그래프 시점부터 보여서 배치 의도가 읽히게
@@ -329,10 +433,53 @@ export class Game {
     this.pendingSpawn = {
       plan,
       aggression: design.aggression,
-      hpMul: 1 + (this.wave - 1) * 0.2, // 후반 웨이브 적 체력↑ (W1=1.0 … W8=2.05)
+      hpMul: 1 + Math.min(this.wave - 1, 8) * 0.1,
       timer: SPAWN_TELEGRAPH_SEC,
       markers: createSpawnMarkers(plan, this.world.scene),
     }
+  }
+
+  private finishWaveObservation(): void {
+    if (!this.combatStarted) return
+    const evaluation = evaluatePrediction(this.activePrediction, this.telemetry.currentEvidence())
+    if (evaluation?.status === 'broken') this.triggerAnomaly()
+    this.telemetry.endWave()
+    this.combatStarted = false
+    if (evaluation) {
+      this.hud.setAnomalyProgress(evaluation)
+      if (evaluation.status === 'tracking') this.hud.showPredictionResult('followed')
+      else if (evaluation.status === 'unreadable') this.hud.showPredictionResult('unreadable')
+    }
+    this.activePrediction = null
+  }
+
+  private updateAnomaly(): void {
+    if (!this.activePrediction || this.anomalyTriggered) return
+    const evaluation: AnomalyEvaluation | null = evaluatePrediction(
+      this.activePrediction,
+      this.telemetry.currentEvidence(),
+    )
+    this.hud.setAnomalyProgress(evaluation)
+    if (evaluation?.status !== 'broken') return
+
+    this.triggerAnomaly()
+  }
+
+  private triggerAnomaly(): void {
+    if (this.anomalyTriggered) return
+    this.anomalyTriggered = true
+    this.activePrediction = null
+    const bonus = Math.round(500 * this.wave * this.scoreMul)
+    this.score += bonus
+    this.rl?.addReward(4)
+    this.projectiles.clearEnemyProjectiles()
+    for (const enemy of this.enemies) enemy.stun(1.25)
+    this.effects.emp(this.player.pos)
+    this.world.ripple(this.player.pos)
+    sfx.anomaly()
+    this.hud.setScore(this.score, this.combo)
+    this.hud.showPredictionResult('broken')
+    this.hud.showAnomalyEmp(bonus)
   }
 
   private clearPendingSpawn(): void {
@@ -350,32 +497,55 @@ export class Game {
     this.hazardZones = []
   }
 
-  /** 웨이브 5 클리어 → 최종 프로토콜: LLM이 누적 프로파일로 보스전을 설계 */
+  /** 최종 웨이브 클리어 → 누적 프로파일로 보스전을 설계 */
   private startBossIntro(): void {
+    this.finishWaveObservation()
     this.state = 'bossIntro'
     this.bossIntroElapsed = 0
     this.verdictTimer = -1
     this.clearHazards()
+    this.projectiles.clear()
+    this.pendingPrediction = null
+    this.activePrediction = null
+    this.hud.showPrediction(null)
+    this.hud.setAnomalyProgress(null)
     this.hud.showIntermission('최종 프로토콜 기동…')
-    // 웨이브5 중 프리페치로 이미 받았으면 그대로 사용 (LLM 판결문 노출). 아니면 지금 요청.
-    if (!this.bossDesign) {
-      const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
-      requestBossDesign(digest).then((design) => {
-        this.bossDesign = design
-      })
+    if (!this.bossDesign && !this.bossRequestController) {
+      this.requestBoss(this.telemetry.runDigest(this.wave, this.player.hpPct))
     }
+  }
+
+  private requestBoss(digest: TelemetryDigest): void {
+    this.bossRequestController?.abort()
+    const controller = new AbortController()
+    const runId = this.runId
+    const sourceWave = this.wave
+    this.bossRequestController = controller
+    void requestBossDesign(digest, controller.signal).then((design) => {
+      if (
+        !design || controller.signal.aborted || runId !== this.runId || this.wave !== sourceWave ||
+        (this.state !== 'playing' && this.state !== 'bossIntro')
+      ) return
+      this.bossDesign = design
+    }).finally(() => {
+      if (this.bossRequestController === controller) this.bossRequestController = null
+    })
   }
 
   private updateBossIntro(dt: number): void {
     this.bossIntroElapsed += dt
+    if (!this.bossDesign && this.bossIntroElapsed >= 6) {
+      this.bossRequestController?.abort()
+      this.bossRequestController = null
+      this.bossDesign = fallbackBossDesign(this.telemetry.runDigest(this.wave, this.player.hpPct))
+    }
     // 설계 도착 + 최소 연출 2초 후: 판결문 낭독
     if (this.bossDesign && this.verdictTimer < 0 && this.bossIntroElapsed >= 2) {
       this.hud.hideIntermission()
-      // 분석 낭독 대신 한 줄 위협만 — "관찰했다"의 증거는 웨이브 리포트가 이미 보여줌. 보스는 짧고 위압적으로.
-      const line = this.bossDesign.verdict.split(/(?<=[.!?…。])\s/)[0].slice(0, 60)
-      this.hud.showTaunt(line, 4.5)
+      const narrationSeconds = Math.max(5.5, this.bossDesign.verdict.length * 0.028 + 1.25)
+      this.hud.showTaunt(this.bossDesign.verdict, narrationSeconds + 0.4)
       sfx.taunt()
-      this.verdictTimer = 3.5
+      this.verdictTimer = narrationSeconds
     }
     if (this.verdictTimer > 0) {
       this.verdictTimer -= dt
@@ -430,6 +600,8 @@ export class Game {
   private onBossDefeated(): void {
     if (!this.boss || this.bossDeathTimer >= 0) return
     this.bossDeathTimer = 1.8
+    this.projectiles.clearEnemyProjectiles()
+    this.clearHazards()
     this.bossDeathPos.copy(this.boss.pos)
     this.effects.hitstop(0.35)
     this.effects.shake(0.8)
@@ -485,10 +657,11 @@ export class Game {
     // 히트스톱: 전투 시간만 느려지고 카메라·이펙트 감쇠는 실시간
     const combatDt = dt * this.effects.timeScale(dt)
     const hpAtFrameStart = this.player.hp
+    const combatFrame = this.state === 'playing' && this.bossDeathTimer < 0
 
     // 해저드 효과 (가시 피해·감속) — 이동 계산 전에 적용
     let speedMul = 1
-    if (this.state === 'playing') {
+    if (combatFrame) {
       for (const h of this.hazardZones) {
         speedMul = Math.min(speedMul, h.update(combatDt, this.player))
         h.updateLabel(this.world.camera)
@@ -498,7 +671,10 @@ export class Game {
 
     this.input.updateAim()
     this.player.update(combatDt, this.input)
-    this.telemetry.tick(combatDt, this.player.pos, this.player.moveDir)
+    if (combatFrame && this.combatStarted) {
+      this.telemetry.tick(combatDt, this.player.pos, this.player.moveDir)
+      this.updateAnomaly()
+    }
 
     if (this.state === 'intermission') {
       this.intermissionTimer -= dt
@@ -511,23 +687,33 @@ export class Game {
     } else if (this.state === 'bossIntro') {
       this.updateBossIntro(dt)
     } else {
-      this.updateSpawnTelegraph(combatDt)
-      this.updateCombat(combatDt)
+      if (this.bossDeathTimer < 0) {
+        this.updateSpawnTelegraph(combatDt)
+        this.updateCombat(combatDt)
+      }
       if (this.boss) {
-        // 라이브 습관 편향 주입 [-1,1] — 양수=오른쪽(월드+X)으로 잘 피함. 보스가 예측 조준에 반영.
-        const dd = this.telemetry.debugDodge()
-        this.boss.habitBias = (dd.right - dd.left) / 100
-        this.boss.update(combatDt, this.player, this.projectiles)
-        this.hud.setBossHp(this.boss.hpPct)
-        if (this.boss.dead) this.onBossDefeated()
+        if (this.bossDeathTimer < 0) {
+          // 라이브 습관 편향 주입 [-1,1] — 양수=오른쪽(월드+X)으로 잘 피함. 보스가 예측 조준에 반영.
+          const dd = this.telemetry.debugDodge()
+          this.boss.habitBias = (dd.right - dd.left) / 100
+          this.boss.update(combatDt, this.player, this.projectiles)
+          this.hud.setBossHp(this.boss.hpPct)
+          if (this.boss.dead) this.onBossDefeated()
+        }
         if (this.bossDeathTimer >= 0) this.updateBossDeath(dt)
       }
       // 대시 잔상
       if (this.player.isDashing) this.effects.dashGhost(this.player.pos)
     }
 
-    this.projectiles.update(combatDt)
-    this.resolveProjectileHits()
+    if (combatFrame && this.state === 'playing' && this.bossDeathTimer < 0) {
+      this.projectiles.update(combatDt)
+      this.resolveProjectileHits()
+      if (this.boss?.dead) this.onBossDefeated()
+      if (this.combatStarted) this.updateAnomaly()
+    } else if (this.state !== 'playing' || this.bossDeathTimer >= 0) {
+      this.projectiles.clearEnemyProjectiles()
+    }
 
     // 콤보 감쇠
     if (this.comboTimer > 0) {
@@ -539,7 +725,7 @@ export class Game {
     }
 
     // 피격 연출·기록 (피해 출처 불문 일원화)
-    if (this.player.hp < hpAtFrameStart) {
+    if (combatFrame && this.bossDeathTimer < 0 && this.player.hp < hpAtFrameStart) {
       const taken = hpAtFrameStart - this.player.hp
       this.telemetry.recordDamageTaken(taken)
       this.rl?.addReward(-0.1 * taken)
@@ -556,7 +742,7 @@ export class Game {
     }
 
     // RL 로깅 — 이번 틱 (관측·행동·보상). 전투 중에만 (?rl 모드)
-    if (this.rl && this.state === 'playing') {
+    if (this.rl && this.state === 'playing' && this.bossDeathTimer < 0) {
       this.rl.tick(combatDt, this.player, this.enemies, this.boss?.dead ? null : (this.boss?.pos ?? null), this.wave, {
         move: this.player.moveDir,
         dash: this.player.isDashing,
@@ -568,14 +754,22 @@ export class Game {
     this.tickFire = false
     this.tickMelee = false
 
+    if (this.pendingWaveClear) {
+      this.pendingWaveClear = false
+      if (this.player.hp > 0) {
+        if (this.wave >= TOTAL_WAVES) this.startBossIntro()
+        else this.startIntermission()
+      }
+    }
+
     this.effects.update(combatDt)
-    this.hud.setHp((this.player.hp / PLAYER.hp) * 100)
+    this.hud.setHp(this.player.hpPct)
     this.world.followCamera(this.player.pos, dt)
     this.effects.applyShake(this.world.camera, dt)
     if (!this.noRender) this.world.render()
     this.input.endFrame()
 
-    if (this.player.hp <= 0) this.endRun(false)
+    if (this.player.hp <= 0 && this.bossDeathTimer < 0) this.endRun(false)
   }
 
   private updateSpawnTelegraph(dt: number): void {
@@ -591,6 +785,7 @@ export class Game {
       this.clearPendingSpawn()
       this.enemies = spawnEnemies(plan, aggression, this.world.scene, hpMul)
       this.waveEnemyCount = this.enemies.length
+      this.combatStarted = true
       for (const e of this.enemies) this.effects.burst(e.pos, e.color, 4, 4)
       sfx.waveStart()
     }
@@ -613,7 +808,6 @@ export class Game {
     // 근접 자동 발동(모든 모드): 밀착한 적/보스가 있으면 전방위 근접
     if (this.enemyInMeleeRange() && this.player.requestMelee()) {
       this.tickMelee = true
-      this.telemetry.recordMelee()
       sfx.meleeSwing()
       this.effects.meleeArc(this.player.pos, this.player.facing, PLAYER.melee.range, PLAYER.melee.arcDeg)
     }
@@ -622,7 +816,6 @@ export class Game {
     if (attacks.melee) this.meleeSweep()
     if (attacks.ranged) {
       this.tickFire = true
-      this.telemetry.recordRanged()
       sfx.shoot()
       this.effects.muzzleFlash(this.player.pos, this.player.facing) // 총구 섬광 — 사격 손맛
       // multishot: 조준 방향 중심으로 각도 분산 발사
@@ -667,22 +860,24 @@ export class Game {
       this.enemies.length <= Math.max(2, Math.ceil(this.waveEnemyCount * 0.4))
     ) {
       this.prefetchedWave = this.wave
-      const digest = this.telemetry.digest(this.wave, (this.player.hp / PLAYER.hp) * 100)
+      const evidence = this.telemetry.currentEvidence()
+      const digest = this.telemetry.waveDigest(this.wave, this.player.hpPct)
+      this.prefetchedDigest = digest
+      this.prefetchedPrediction = buildPredictionContract(this.wave, evidence)
       if (this.wave < TOTAL_WAVES) {
         this.requestDesign(digest) // 다음 웨이브 설계
       } else {
         // 최종 웨이브 → 보스 판결문(누적 프로파일의 총결산, 최고의 LLM 순간) 프리페치
-        requestBossDesign(digest).then((d) => (this.bossDesign = d))
+        this.requestBoss(this.telemetry.runDigest(this.wave, this.player.hpPct))
       }
     }
 
-    if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss) {
+    if (this.enemies.length === 0 && !this.pendingSpawn && !this.boss && !this.pendingWaveClear) {
       this.score += Math.round(SCORE.waveClear * this.scoreMul)
       this.rl?.addReward(5)
       this.hud.setScore(this.score, this.combo)
       this.effects.hitstop(0.28) // 클리어 슬로모
-      if (this.wave >= TOTAL_WAVES) this.startBossIntro()
-      else this.startIntermission()
+      this.pendingWaveClear = true
     }
   }
 
@@ -717,8 +912,8 @@ export class Game {
     }
     this.combo++
     this.comboTimer = 3
-    const gained = SCORE[e.type] * this.combo
-    this.score += Math.round(gained * this.scoreMul)
+    const gained = Math.round(SCORE[e.type] * this.combo * this.scoreMul)
+    this.score += gained
     this.effects.damageNumber(e.pos, `+${gained}`, 'score')
     this.hud.setScore(this.score, this.combo)
   }
@@ -820,23 +1015,26 @@ export class Game {
       const dist = _toEnemy.length()
       if (dist > PLAYER.melee.range + e.radius) continue
       _toEnemy.normalize()
+      const hpBefore = e.hp
       const applied = e.takeDamage(this.player.stats.meleeDamage, _toEnemy, e.type === 'brute' ? 4 : 11, this.player.pos)
       if (!applied) {
         this.effects.damageNumber(e.pos, '차단', 'blocked')
         sfx.enemyHit()
         continue
       }
+      this.telemetry.recordDamageDealt('melee', Math.max(0, hpBefore - e.hp))
       this.effects.burst(e.pos, 0xd9f99d, 5, 5)
       this.effects.damageNumber(e.pos, String(this.player.stats.meleeDamage))
       hitAny = true
       // thorns: 근접 반격 가시 — 근접 의존을 처벌
       if (e.has('thorns') && !this.player.isDashing) {
         this.player.takeDamage(9, "가시 반격")
-        this.effects.damageNumber(this.player.pos, '가시 -4', 'player')
       }
     }
     if (this.boss && !this.boss.dead && this.boss.pos.distanceTo(this.player.pos) <= PLAYER.melee.range + BOSS.radius) {
+      const hpBefore = this.boss.hp
       if (this.boss.takeDamage(this.player.stats.meleeDamage)) {
+        this.telemetry.recordDamageDealt('melee', Math.max(0, hpBefore - this.boss.hp))
         this.effects.burst(this.boss.pos, 0xffb86b, 6, 6)
         this.effects.damageNumber(this.boss.pos, String(this.player.stats.meleeDamage))
         hitAny = true
@@ -859,7 +1057,9 @@ export class Game {
         if (this.boss && !this.boss.dead) {
           const hitDist = p.radius + BOSS.radius
           if (p.pos.distanceToSquared(this.boss.pos) < hitDist * hitDist) {
+            const hpBefore = this.boss.hp
             if (this.boss.takeDamage(p.damage)) {
+              this.telemetry.recordDamageDealt('ranged', Math.max(0, hpBefore - this.boss.hp))
               sfx.enemyHit()
               this.effects.burst(this.boss.pos, 0xffb86b, 5, 6)
               this.effects.damageNumber(this.boss.pos, String(p.damage))
@@ -877,8 +1077,10 @@ export class Game {
             _toEnemy.copy(p.vel).setY(0).normalize()
             // 투사체의 발사 방향 반대편이 공격 출처
             const from = p.pos.clone().addScaledVector(p.vel, -0.3)
+            const hpBefore = e.hp
             const applied = e.takeDamage(p.damage, _toEnemy, 3, from)
             if (applied) {
+              this.telemetry.recordDamageDealt('ranged', Math.max(0, hpBefore - e.hp))
               sfx.enemyHit()
               this.effects.burst(e.pos, 0xa5f3fc, 6, 8) // 명중 스파크 — 크런치
               this.effects.damageNumber(e.pos, String(p.damage))
@@ -900,6 +1102,17 @@ export class Game {
   }
 
   private endRun(victory: boolean): void {
+    if (this.endRunLocked) return
+    this.endRunLocked = true
+    this.openingRequestController?.abort()
+    this.waveRequestController?.abort()
+    this.bossRequestController?.abort()
+    this.openingRequestController = null
+    this.waveRequestController = null
+    this.bossRequestController = null
+    this.telemetry.endWave()
+    this.combatStarted = false
+    this.projectiles.clear()
     this.state = victory ? 'victory' : 'gameover'
     memory.endRun(victory, this.wave)
     // RL 에피소드 종료 — 보상 마감 후 업로드 (개발자가 /rl로 조회, 학습 데이터셋)
@@ -949,24 +1162,29 @@ export class Game {
       'RETRY',
       () => this.startRun(),
     )
-    void this.submitAndShowBoard()
+    void this.submitAndShowBoard(this.runId)
   }
 
   /** 리더보드 제출·표시 — 저장된 이름이 있으면 자동 제출, 없으면 등록 버튼으로 */
-  private async submitAndShowBoard(): Promise<void> {
+  private async submitAndShowBoard(runId: number): Promise<void> {
     const name = localStorage.getItem('overmind-name') ?? ''
     if (name && !this.scoreSubmitted) {
       this.scoreSubmitted = true
       await submitScore(name, this.score, this.wave, GAME_VERSION + (this.easy ? "-easy" : ""))
+      if (runId !== this.runId) return
     }
     const board = await fetchLeaderboard(GAME_VERSION + (this.easy ? "-easy" : ""))
+    if (runId !== this.runId) return
     this.hud.showLeaderboard(board, this.score, name, async (newName) => {
+      if (runId !== this.runId) return
       localStorage.setItem('overmind-name', newName)
       if (!this.scoreSubmitted) {
         this.scoreSubmitted = true
         await submitScore(newName, this.score, this.wave, GAME_VERSION + (this.easy ? "-easy" : ""))
+        if (runId !== this.runId) return
       }
       const updated = await fetchLeaderboard(GAME_VERSION + (this.easy ? "-easy" : ""))
+      if (runId !== this.runId) return
       this.hud.showLeaderboard(updated, this.score, newName, () => {})
     })
   }

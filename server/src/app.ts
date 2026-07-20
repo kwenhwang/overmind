@@ -130,7 +130,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     const entry = {
       name: String(body.name ?? '익명').slice(0, 12).replace(/[<>&]/g, ''),
       score: Math.floor(body.score),
-      wave: Math.max(0, Math.min(9, Math.floor(body.wave ?? 0))),
+      wave: Math.max(0, Math.min(11, Math.floor(body.wave ?? 0))),
       at: Date.now(),
     }
     const key = `leaderboard:${version}`

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { ARENA_RADIUS, PLAYER, type EnemyType } from './config'
+import { ARENA_RADIUS, TOTAL_WAVES, type EnemyType } from './config'
 import type { Player } from './player'
 import type { Enemy } from './enemies'
 
@@ -56,7 +56,7 @@ export class Recorder {
     action: { move: THREE.Vector3; dash: boolean; fire: boolean; melee: boolean; aim: THREE.Vector3 },
   ): void {
     this.t += dt
-    this.pendingReward += 0.001 // 생존 보상
+    this.pendingReward += dt * 0.02 // 프레임률과 무관한 생존 보상
     this.accum += dt
     if (this.accum < this.tickEvery) return
     this.accum = 0
@@ -79,11 +79,11 @@ export class Recorder {
     const o: number[] = [
       player.pos.x / ARENA_RADIUS,
       player.pos.z / ARENA_RADIUS,
-      player.hp / PLAYER.hp,
+      player.hp / player.stats.maxHp,
       player.facing.x,
       player.facing.z,
       player.isDashing ? 1 : 0,
-      wave / 5,
+      wave / TOTAL_WAVES,
     ]
     // 최근접 K개 적: [상대x, 상대z, drone?, spitter?, brute?, hp정규화]
     const sorted = [...enemies]

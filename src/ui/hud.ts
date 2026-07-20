@@ -1,4 +1,8 @@
-import type { TelemetryDigest } from '../ai/schema'
+import type {
+  AnomalyEvaluation,
+  PredictionContract,
+  TelemetryDigest,
+} from '../ai/schema'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
@@ -6,6 +10,20 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 }
+
+type PredictionTarget = PredictionContract['target']
+
+const TARGET_LABELS: Record<PredictionTarget, string> = {
+  dodge_left: '왼쪽 회피를 반복한다',
+  dodge_right: '오른쪽 회피를 반복한다',
+  melee: '근접 공격에 집착한다',
+  ranged: '원거리 공격을 고수한다',
+  center: '아레나 중앙으로 모인다',
+  edge: '아레나 외곽에 머문다',
+  unreadable: 'UNREADABLE',
+}
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 export class Hud {
   private hpBar = $<HTMLDivElement>('hp-bar')
@@ -17,12 +35,28 @@ export class Hud {
   private screenTitle = $<HTMLHeadingElement>('screen-title')
   private screenDesc = $<HTMLParagraphElement>('screen-desc')
   private screenBtn = $<HTMLButtonElement>('screen-btn')
+  private prediction = $<HTMLElement>('prediction')
+  private predictionLabel = $<HTMLDivElement>('prediction-label')
+  private predictionSource = $<HTMLDivElement>('prediction-source')
+  private anomalyReadout = $<HTMLDivElement>('anomaly-readout')
+  private anomalyProgress = $<HTMLDivElement>('anomaly-progress')
+  private anomalyProgressBar = $<HTMLDivElement>('anomaly-progress-bar')
+  private predictionScan = $<HTMLDivElement>('prediction-scan')
+  private predictionResult = $<HTMLDivElement>('prediction-result')
+  private anomalyEmp = $<HTMLDivElement>('anomaly-emp')
   private tauntTimer: ReturnType<typeof setTimeout> | undefined
   private typeTimer: ReturnType<typeof setInterval> | undefined
+  private resultTimer: ReturnType<typeof setTimeout> | undefined
+  private empTimer: ReturnType<typeof setTimeout> | undefined
+  private scanSequence = 0
+  private upgradeCleanup: (() => void) | undefined
+  private predictionKey = ''
 
   setHp(pct: number): void {
-    this.hpBar.style.width = `${Math.max(0, pct)}%`
-    this.hpBar.classList.toggle('low', pct < 35)
+    const safePct = Math.min(100, Math.max(0, pct))
+    this.hpBar.style.width = `${safePct}%`
+    this.hpBar.parentElement?.setAttribute('aria-valuenow', String(Math.round(safePct)))
+    this.hpBar.classList.toggle('low', safePct < 35)
   }
 
   setWave(current: number, total: number): void {
@@ -40,7 +74,9 @@ export class Hud {
   }
 
   setBossHp(pct: number): void {
-    ;(document.getElementById('boss-bar') as HTMLElement).style.width = `${Math.max(0, pct)}%`
+    const safePct = Math.min(100, Math.max(0, pct))
+    ;(document.getElementById('boss-bar') as HTMLElement).style.width = `${safePct}%`
+    document.getElementById('boss-bar-bg')?.setAttribute('aria-valuenow', String(Math.round(safePct)))
   }
 
   hideBossBar(): void {
@@ -140,25 +176,213 @@ export class Hud {
     this.report.classList.add('hidden')
   }
 
+  /** 현재 오버마인드의 공개 예측 — 전투 중 계속 보이는 심리전 계약. */
+  showPrediction(contract: PredictionContract | null): void {
+    if (!contract) {
+      this.predictionKey = ''
+      this.scanSequence++
+      this.predictionScan.className = 'hidden'
+      this.predictionScan.removeAttribute('data-target')
+      this.predictionScan.setAttribute('aria-hidden', 'true')
+      this.prediction.classList.add('hidden')
+      this.prediction.removeAttribute('data-target')
+      this.setAnomalyProgress(null)
+      return
+    }
+    const nextKey = `${contract.sourceWave}:${contract.target}:${contract.observedPct}`
+    if (nextKey !== this.predictionKey) {
+      this.predictionKey = nextKey
+      this.setAnomalyProgress(null)
+    }
+    const observedPct = Math.round(Math.min(100, Math.max(0, contract.observedPct)))
+    this.prediction.dataset.target = contract.target
+    this.predictionLabel.textContent = TARGET_LABELS[contract.target]
+    this.predictionSource.textContent =
+      contract.target === 'unreadable'
+        ? `WAVE ${contract.sourceWave} · 패턴 균형 유지`
+        : `WAVE ${contract.sourceWave} 관측치 ${observedPct}%`
+    this.prediction.classList.remove('hidden')
+  }
+
+  /** 현재 행동이 AI 예측에서 얼마나 벗어났는지 0..1 진행도로 표시. */
+  setAnomalyProgress(evaluation: AnomalyEvaluation | null): void {
+    if (!evaluation) {
+      this.anomalyReadout.textContent = '분석 대기'
+      this.anomalyProgressBar.style.width = '0%'
+      this.anomalyProgress.setAttribute('aria-valuenow', '0')
+      this.anomalyProgress.setAttribute('aria-valuetext', '분석 대기')
+      this.prediction.classList.remove('is-broken', 'is-unreadable')
+      return
+    }
+
+    const progressPct = Math.round(Math.min(1, Math.max(0, evaluation.progress)) * 100)
+    const targetPct = Math.round(Math.min(100, Math.max(0, evaluation.targetPct)))
+    this.anomalyProgressBar.style.width = `${progressPct}%`
+    this.anomalyProgress.setAttribute('aria-valuenow', String(progressPct))
+    this.prediction.classList.toggle('is-broken', evaluation.status === 'broken')
+    this.prediction.classList.toggle('is-unreadable', evaluation.status === 'unreadable')
+
+    switch (evaluation.status) {
+      case 'insufficient':
+        this.anomalyReadout.textContent = `반대 행동 근거 ${progressPct}% · 현재 ${targetPct}%`
+        break
+      case 'tracking':
+        this.anomalyReadout.textContent = `예측 탈피 ${progressPct}% · 현재 ${targetPct}%`
+        break
+      case 'broken':
+        this.anomalyReadout.textContent = '예측 파괴 — EMP 준비 완료'
+        break
+      case 'unreadable':
+        this.anomalyReadout.textContent = '패턴 해독 실패 — UNREADABLE'
+        break
+    }
+    this.anomalyProgress.setAttribute('aria-valuetext', this.anomalyReadout.textContent)
+  }
+
+  /** 관찰→습관 영역 점등→예측 잠금의 인터미션 연출. */
+  async playPredictionScan(contract: PredictionContract): Promise<void> {
+    const sequence = ++this.scanSequence
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+    const scanMs = reducedMotion ? 20 : 420
+    const targetMs = reducedMotion ? 20 : 620
+    const lockMs = reducedMotion ? 60 : 650
+    const scanKicker = $<HTMLDivElement>('scan-kicker')
+    const scanLabel = $<HTMLElement>('scan-label')
+    const scanDetail = $<HTMLSpanElement>('scan-detail')
+
+    this.predictionScan.dataset.target = contract.target
+    this.predictionScan.className = ''
+    this.predictionScan.classList.add('scan-active')
+    this.predictionScan.setAttribute('aria-hidden', 'false')
+    scanKicker.textContent = 'BEHAVIORAL SCAN'
+    scanLabel.textContent = '행동 패턴 재구성'
+    scanDetail.textContent = `WAVE ${contract.sourceWave} 관측 데이터`
+    void this.predictionScan.offsetWidth
+
+    await wait(scanMs)
+    if (sequence !== this.scanSequence) return
+    this.predictionScan.classList.add('target-acquired')
+    scanLabel.textContent = TARGET_LABELS[contract.target]
+    scanDetail.textContent =
+      contract.target === 'unreadable'
+        ? '유효한 편향을 찾지 못했다'
+        : `행동 집중도 ${Math.round(contract.observedPct)}%`
+
+    await wait(targetMs)
+    if (sequence !== this.scanSequence) return
+    this.predictionScan.classList.add('prediction-locked')
+    scanKicker.textContent = contract.target === 'unreadable' ? 'SIGNAL LOST' : 'PREDICTION LOCKED'
+    this.showPrediction(contract)
+
+    await wait(lockMs)
+    if (sequence !== this.scanSequence) return
+    this.predictionScan.classList.add('scan-out')
+    await wait(reducedMotion ? 20 : 220)
+    if (sequence !== this.scanSequence) return
+    this.predictionScan.className = 'hidden'
+    this.predictionScan.removeAttribute('data-target')
+    this.predictionScan.setAttribute('aria-hidden', 'true')
+  }
+
+  /** 예측의 최종 판정을 화면 중앙에 짧게 노출. */
+  showPredictionResult(result: 'broken' | 'followed' | 'unreadable'): void {
+    clearTimeout(this.resultTimer)
+    this.predictionResult.className = ''
+    this.predictionResult.classList.add(`result-${result}`)
+    this.predictionResult.textContent =
+      result === 'broken'
+        ? 'PREDICTION BROKEN'
+        : result === 'unreadable'
+          ? 'UNREADABLE — NO PATTERN FOUND'
+          : 'PREDICTION CONFIRMED'
+    void this.predictionResult.offsetWidth
+    this.predictionResult.classList.add('show')
+    this.resultTimer = setTimeout(() => this.predictionResult.classList.add('hidden'), 1800)
+  }
+
+  /** 균형 플레이 보상용 별도 메시지. */
+  showUnreadable(bonus = 0): void {
+    this.showPredictionResult('unreadable')
+    if (bonus > 0) this.anomalyReadout.textContent = `UNREADABLE 보너스 +${bonus.toLocaleString()}`
+  }
+
+  /** 예측 파괴 보상 — 청백 EMP 펄스와 점수 보너스. */
+  showAnomalyEmp(bonus: number): void {
+    clearTimeout(this.empTimer)
+    $<HTMLSpanElement>('anomaly-bonus').textContent = `+${Math.max(0, Math.round(bonus)).toLocaleString()} SCORE`
+    this.anomalyEmp.className = ''
+    void this.anomalyEmp.offsetWidth
+    this.anomalyEmp.classList.add('emp-active')
+    this.empTimer = setTimeout(() => this.anomalyEmp.classList.add('hidden'), 1450)
+  }
+
   /** 업그레이드 3택 카드 표시 — 선택 시 onPick(index) 후 자동 숨김 */
   showUpgrades(choices: { name: string; desc: string }[], onPick: (i: number) => void): void {
     const el = document.getElementById('upgrades') as HTMLDivElement
+    this.clearUpgradeInteraction()
     el.innerHTML =
-      '<div class="upg-hint">강화 선택 — 오버마인드에 맞서 진화하라</div>' +
+      '<div class="upg-hint" id="upg-hint">강화 선택 — 1·2·3 또는 방향키</div>' +
       choices
-        .map((c, i) => `<div class="upg-card" data-i="${i}"><div class="upg-name">${escapeHtml(c.name)}</div><div class="upg-desc">${escapeHtml(c.desc)}</div></div>`)
+        .map((c, i) => `<button type="button" class="upg-card" data-i="${i}" aria-describedby="upg-hint"><span class="upg-key" aria-hidden="true">${i + 1}</span><span class="upg-name">${escapeHtml(c.name)}</span><span class="upg-desc">${escapeHtml(c.desc)}</span></button>`)
         .join('')
     el.classList.remove('hidden')
-    el.querySelectorAll<HTMLElement>('.upg-card').forEach((card) => {
-      card.onclick = () => {
-        el.classList.add('hidden')
-        onPick(Number(card.dataset.i))
+    const cards = [...el.querySelectorAll<HTMLButtonElement>('.upg-card')]
+    let selected = 0
+    let settled = false
+    const focusCard = (index: number): void => {
+      selected = (index + cards.length) % cards.length
+      cards[selected]?.focus()
+    }
+    const pick = (index: number): void => {
+      if (settled || !cards[index]) return
+      settled = true
+      el.classList.add('hidden')
+      this.clearUpgradeInteraction()
+      onPick(index)
+    }
+    cards.forEach((card, index) => (card.onclick = () => pick(index)))
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const numberMatch = /^(?:Digit|Numpad)([1-3])$/.exec(event.code)
+      if (numberMatch) {
+        event.preventDefault()
+        pick(Number(numberMatch[1]) - 1)
+        return
       }
-    })
+      if (event.code === 'ArrowRight' || event.code === 'ArrowDown') {
+        event.preventDefault()
+        focusCard(selected + 1)
+      } else if (event.code === 'ArrowLeft' || event.code === 'ArrowUp') {
+        event.preventDefault()
+        focusCard(selected - 1)
+      } else if (event.code === 'Enter') {
+        event.preventDefault()
+        pick(selected)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    this.upgradeCleanup = () => document.removeEventListener('keydown', onKeyDown)
+    requestAnimationFrame(() => focusCard(0))
   }
 
   hideUpgrades(): void {
-    document.getElementById('upgrades')?.classList.add('hidden')
+    const upgrades = document.getElementById('upgrades')
+    if (upgrades?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
+    upgrades?.classList.add('hidden')
+    this.clearUpgradeInteraction()
+  }
+
+  private clearUpgradeInteraction(): void {
+    this.upgradeCleanup?.()
+    this.upgradeCleanup = undefined
+  }
+
+  /** 새 판 시작 시 이전 판의 비동기 스캔·중앙 판정·EMP 잔상을 모두 정리. */
+  resetTransient(): void {
+    this.showPrediction(null)
+    clearTimeout(this.resultTimer)
+    clearTimeout(this.empTimer)
+    this.predictionResult.className = 'hidden'
+    this.anomalyEmp.className = 'hidden'
   }
 
   /**
@@ -196,13 +420,23 @@ export class Hud {
     document.getElementById('board-wrap')?.classList.add('hidden')
   }
 
+  /** 자동 시작에서도 초기 부팅/타이틀 오버레이와 HUD 차단을 확실히 해제. */
+  beginGameplay(): void {
+    this.screen.classList.add('hidden')
+    document.getElementById('hud')?.classList.remove('screen-open')
+  }
+
   showScreen(title: string, desc: string, button: string, onClick: () => void): void {
+    document.getElementById('hud')?.classList.add('screen-open')
     this.screenTitle.textContent = title
     this.screenDesc.textContent = desc
     this.screenBtn.textContent = button
+    this.screenBtn.disabled = false
+    this.screen.classList.remove('booting')
+    this.screen.setAttribute('aria-busy', 'false')
     this.screen.classList.remove('hidden')
     this.screenBtn.onclick = () => {
-      this.screen.classList.add('hidden')
+      this.beginGameplay()
       onClick()
     }
   }

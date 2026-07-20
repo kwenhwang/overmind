@@ -20,6 +20,7 @@ export class Input {
   private mouseDashRequested = false
 
   constructor(private camera: THREE.Camera) {
+    const gameCanvas = document.getElementById('game')
     addEventListener('keydown', (e) => {
       if (e.repeat) return
       this.keys.add(e.code)
@@ -29,17 +30,31 @@ export class Input {
       this.mouseNdc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
     })
     // 좌클릭 = 사격(연사), 우클릭 = 대시(회피). 근접은 밀착 시 자동 발동.
-    addEventListener('mousedown', (e) => {
+    gameCanvas?.addEventListener('mousedown', (e) => {
       if (e.button === 0) this.rangedHeld = true
       if (e.button === 2) this.mouseDashRequested = true
     })
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.rangedHeld = false
     })
-    addEventListener('contextmenu', (e) => e.preventDefault())
-    addEventListener('blur', () => this.keys.clear())
+    // 브라우저 메뉴는 실제 게임 캔버스에서만 막는다. UI/입력칸의 우클릭은 정상 동작.
+    gameCanvas?.addEventListener('contextmenu', (e) => e.preventDefault())
+    addEventListener('blur', () => this.clearHeldState())
 
     if (IS_TOUCH) this.bindTouch()
+  }
+
+  /** 포커스 이탈 시 연사·대시·조이스틱까지 전부 해제해 입력 고착을 방지. */
+  private clearHeldState(): void {
+    this.keys.clear()
+    this.rangedHeld = false
+    this.touchDashRequested = false
+    this.mouseDashRequested = false
+    this.joyId = null
+    this.joyVector.set(0, 0)
+    const joyKnob = document.getElementById('joy-knob')
+    if (joyKnob) joyKnob.style.transform = 'translate(0,0)'
+    document.getElementById('joy-base')?.classList.add('hidden')
   }
 
   /**

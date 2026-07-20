@@ -104,3 +104,33 @@ export interface TelemetryDigest {
   killsByType: Partial<Record<EnemyType, number>>
   waveClearSeconds: number
 }
+
+/** 오버마인드가 다음 웨이브에서 공개적으로 예측할 수 있는 행동 습관. */
+export type BehaviorTarget = 'dodge_left' | 'dodge_right' | 'melee' | 'ranged' | 'center' | 'edge'
+
+/** 한 웨이브의 원시 행동 근거. 퍼센트가 아닌 표본량을 함께 보존해 과잉 판단을 막는다. */
+export interface BehaviorEvidence {
+  dodgeLeftSeconds: number
+  dodgeRightSeconds: number
+  meleeDamage: number
+  rangedDamage: number
+  centerSeconds: number
+  edgeSeconds: number
+  avgDistToCenter: number
+}
+
+/** 직전 웨이브에서 고정해 다음 웨이브에 공개하는 예측 계약. */
+export interface PredictionContract {
+  target: BehaviorTarget | 'unreadable'
+  observedPct: number
+  sourceWave: number
+}
+
+/** 현재 행동이 공개된 예측을 얼마나 깨뜨렸는지에 대한 순수 판정 결과. */
+export interface AnomalyEvaluation {
+  status: 'insufficient' | 'tracking' | 'broken' | 'unreadable'
+  target: BehaviorTarget | 'unreadable'
+  targetPct: number
+  progress: number
+  sufficientEvidence: boolean
+}

@@ -5,7 +5,7 @@ const browser = await chromium.launch({ args: ['--no-sandbox', '--enable-unsafe-
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 page.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 300)))
 await page.goto('http://localhost:5199/?autostart&boss&nobloom&timescale=3')
-await page.waitForFunction(() => window.__dbg?.().boss !== null, undefined, { timeout: 90000, polling: 500 })
+await page.waitForFunction(() => Boolean(window.__dbg?.().boss), undefined, { timeout: 90000, polling: 500 })
 console.log('spawned:', JSON.stringify(await page.evaluate(() => window.__dbg?.())))
 // 강림 동안 대기 후 원거리 연사 (오버마인드가 접근해오므로 명중 기대)
 await page.waitForTimeout(2500)

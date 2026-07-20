@@ -109,7 +109,9 @@ const PROFILE_KEY = 'overmind-profile'
 const RUNS_KEY = 'overmind-runs'
 const OUTCOME_KEY = 'overmind-last-outcome'
 
-let seq = 0
+let openingSeq = 0
+let waveSeq = 0
+let bossSeq = 0
 
 /** 판을 넘는 기억 — localStorage 관리 */
 export const memory = {
@@ -135,50 +137,75 @@ export const memory = {
   },
 }
 
-export async function requestWaveDesign(digest: TelemetryDigest): Promise<WaveDesign> {
-  const mySeq = ++seq
+async function fetchWaveDesign(
+  digest: TelemetryDigest,
+  signal: AbortSignal | undefined,
+  isCurrent: () => boolean,
+  persistProfile: boolean,
+): Promise<WaveDesign | null> {
   const body = JSON.stringify({ ...digest, ...memory.runContext() })
   for (const base of ENDPOINTS) {
+    if (signal?.aborted || !isCurrent()) return null
     try {
       const res = await fetch(`${base}/directive`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
         body,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
       })
+      if (signal?.aborted || !isCurrent()) return null
       if (!res.ok) continue
       const data = (await res.json()) as WaveDesign & { fallback?: boolean }
       if (data.fallback) break // 서버 예산 캡 → 폴백
-      if (mySeq !== seq) break // 낡은 응답 폐기
-      memory.saveProfile(data.profileUpdate ?? '')
-      return enforceDominantCounter(sanitize(data, digest.wave + 1), digest)
+      if (signal?.aborted || !isCurrent()) return null
+      if (persistProfile) memory.saveProfile(data.profileUpdate ?? '')
+      return sanitize(enforceDominantCounter(data, digest), digest.wave + 1)
     } catch {
+      if (signal?.aborted || !isCurrent()) return null
       // 다음 엔드포인트로 페일오버
     }
   }
+  if (signal?.aborted || !isCurrent()) return null
   return fallbackDesign(digest)
 }
 
+export async function requestWaveDesign(digest: TelemetryDigest, signal?: AbortSignal): Promise<WaveDesign | null> {
+  const requestSeq = ++waveSeq
+  return fetchWaveDesign(digest, signal, () => requestSeq === waveSeq, true)
+}
+
+/** W1을 막지 않는 복귀 인사 전용 요청. 웨이브 프리페치와 수명·프로파일 갱신을 분리한다. */
+export async function requestOpeningDesign(digest: TelemetryDigest, signal?: AbortSignal): Promise<WaveDesign | null> {
+  const requestSeq = ++openingSeq
+  return fetchWaveDesign(digest, signal, () => requestSeq === openingSeq, false)
+}
+
 /** 보스전 설계 요청 — 누적 프로파일의 총결산. 실패 시 규칙기반 폴백 보스 */
-export async function requestBossDesign(digest: TelemetryDigest): Promise<BossDesign> {
+export async function requestBossDesign(digest: TelemetryDigest, signal?: AbortSignal): Promise<BossDesign | null> {
+  const mySeq = ++bossSeq
   const body = JSON.stringify({ ...digest, ...memory.runContext(), boss: true })
   for (const base of ENDPOINTS) {
+    if (signal?.aborted || mySeq !== bossSeq) return null
     try {
       const res = await fetch(`${base}/directive`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
         body,
-        signal: AbortSignal.timeout(20_000), // 보스 판결문은 웨이브5 중 프리페치 → 넉넉히
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
       })
+      if (signal?.aborted || mySeq !== bossSeq) return null
       if (!res.ok) continue
       const data = (await res.json()) as BossDesign & { fallback?: boolean }
       if (data.fallback) break
       if (!data.phases?.length) break
+      if (signal?.aborted || mySeq !== bossSeq) return null
       return data
     } catch {
+      if (signal?.aborted || mySeq !== bossSeq) return null
       // 다음 엔드포인트로 페일오버
     }
   }
+  if (signal?.aborted || mySeq !== bossSeq) return null
   return fallbackBossDesign(digest)
 }
 
@@ -210,25 +237,32 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
 
 /**
  * LLM 출력 최종 방어선 + 난이도 가드레일.
- * LLM/폴백이 초반 웨이브에 과도한 구성(12기+모디파이어+해저드)을 쏟아 심사위원이
+ * LLM/폴백이 초반 웨이브에 과도한 구성(다수 유닛+모디파이어+해저드)을 쏟아 심사위원이
  * 첫 판에 급사하는 것을 방지 — 웨이브 번호에 비례해 적 수·모디파이어·해저드를 클램프.
  * (설계 의도는 유지하되 강도만 웨이브에 맞게 조인다.)
  */
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
-  // 난이도 커브: 초반 완만(심사자 진입장벽↓) → 후반 밀도↑. 모바일 성능 위해 상한 12.
-  const maxEnemies = Math.min(3 + Math.ceil(wave * 1.7), 14) // W1=5 W3=8 W5=11 W8=12
+  const threatBudget = Math.min(5 + (wave - 1) * 1.5, 18)
+  const unitCap = 14
   const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
   const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
+  const threatCost = { drone: 1, spitter: 1.25, brute: 2.5 } as const
 
-  let budget = maxEnemies
-  const spawns = d.spawns
-    .map((s) => {
-      const count = Math.max(1, Math.min(s.count, budget))
-      budget -= count
-      return { type: s.type, count, modifiers: (s.modifiers ?? []).slice(0, maxModsPerGroup) }
-    })
-    .filter((s) => s.count > 0 && budget >= 0 - s.count)
-  if (spawns.length === 0) spawns.push({ type: 'drone', count: Math.min(4, maxEnemies), modifiers: [] })
+  let remainingThreat = threatBudget
+  let remainingUnits = unitCap
+  const spawns: WaveDesign['spawns'] = []
+  for (const spawn of d.spawns) {
+    const requested = Math.max(0, Math.floor(spawn.count))
+    if (requested === 0 || remainingUnits === 0) continue
+    const modifiers = uniq(spawn.modifiers ?? []).slice(0, maxModsPerGroup)
+    const costPerUnit = threatCost[spawn.type] + modifiers.length * 0.5
+    const affordable = Math.floor((remainingThreat + Number.EPSILON) / costPerUnit)
+    const count = Math.min(requested, remainingUnits, affordable)
+    if (count <= 0) continue
+    spawns.push({ type: spawn.type, count, modifiers })
+    remainingThreat -= count * costPerUnit
+    remainingUnits -= count
+  }
 
   return {
     ...d,
@@ -256,14 +290,14 @@ function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDes
   const dodgeDev = Math.abs(digest.dodgeLeftPct - 50)
   const weaponDev = Math.abs(digest.meleeUsePct - 50)
   // 편향이 미미하면(둘 다 <12%p) 개입하지 않고 LLM 설계를 존중
-  if (dodgeDev < 10 && weaponDev < 10) return d
+  if (dodgeDev < 12 && weaponDev < 12) return d
 
   const spawns = d.spawns.map((s) => ({ ...s, modifiers: [...(s.modifiers ?? [])] }))
   let hazards = [...(d.hazards ?? [])]
   let bias = d.spawnBias
   let reason = d.counterReason
 
-  if (dodgeDev >= 10 && dodgeDev >= weaponDev) {
+  if (dodgeDev >= 12 && dodgeDev >= weaponDev) {
     // 회피 방향 봉쇄 — 그쪽에 스폰 몰고 가시밭을 깐다 (도망갈 곳을 없앤다)
     const left = digest.dodgeLeftPct > 50
     const pct = Math.max(digest.dodgeLeftPct, digest.dodgeRightPct)
@@ -337,7 +371,7 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
   }
   // 폴백도 LLM 경로와 동일하게 sanitize(적 수·모디파이어 상한) → 인과 보장 레이어를 거친다.
   // (sanitize 누락으로 폴백만 후반 웨이브 상한을 넘던 것 수정 — 모바일 성능·일관성)
-  return enforceDominantCounter(sanitize(base, wave), digest)
+  return sanitize(enforceDominantCounter(base, digest), wave)
 }
 
 const TAUNT_POOL = [

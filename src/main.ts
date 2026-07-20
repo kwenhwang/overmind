@@ -3,20 +3,36 @@ import { loadModels } from './game/models'
 import { initSession } from './ai/director'
 import { GAME_VERSION } from './game/config'
 
-// 화면 버전 표시 — 캐시(옛 빌드) 여부 즉시 진단용. 우하단 작게.
-const ver = document.createElement('div')
-ver.id = 'ver'
-ver.textContent = `${GAME_VERSION} · ${__BUILD__}`
-document.body.appendChild(ver)
+const params = new URLSearchParams(location.search)
 
-// 모델 선로드 + 세션 토큰 발급 (둘 다 실패해도 게임은 폴백으로 진행)
-await Promise.all([loadModels(), initSession()])
+// 세션 발급은 게임 준비를 절대 막지 않는다. 토큰이 늦거나 없어도 디렉터 폴백으로 진행.
+void initSession().catch(() => undefined)
+
+// 진단·빌드 정보는 일반 플레이에서는 숨기고 ?debug에서만 노출.
+if (params.has('debug')) {
+  document.getElementById('diag-btn')?.classList.remove('hidden')
+  const ver = document.createElement('div')
+  ver.id = 'ver'
+  ver.textContent = `${GAME_VERSION} · ${__BUILD__}`
+  ver.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(ver)
+}
+
+// 모델이 하나도 로드되지 않아도 절차 도형 폴백으로 Game은 반드시 생성한다.
+try {
+  await loadModels()
+} catch (error) {
+  console.warn('model preload failed; using fallback geometry', error)
+}
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
+if (params.has('autostart')) {
+  document.getElementById('screen')?.classList.add('hidden')
+  document.getElementById('hud')?.classList.remove('screen-open')
+}
 const game = new Game(canvas)
 
 // 고정 스텝 업데이트 + rAF 렌더 — 탭 비활성 후 복귀 시 dt 폭주 방지 클램프
-const params = new URLSearchParams(location.search)
 // ?timescale=N — 헤드리스 검증·밸런스 테스트용 배속 (기본 1)
 const timescale = Number(params.get('timescale')) || 1
 

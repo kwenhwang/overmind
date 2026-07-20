@@ -5,7 +5,7 @@ const browser = await chromium.launch({ args: ['--no-sandbox', '--enable-unsafe-
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 page.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 400)))
 await page.goto('http://localhost:5199/?autostart&boss&nobloom&timescale=3')
-await page.waitForFunction(() => window.__dbg?.().boss !== null, undefined, { timeout: 90000, polling: 500 })
+await page.waitForFunction(() => Boolean(window.__dbg?.().boss), undefined, { timeout: 90000, polling: 500 })
 console.log('boss spawned:', JSON.stringify(await page.evaluate(() => window.__dbg?.())))
 console.log('boss bar:', await page.$eval('#boss-name', (el) => el.textContent))
 await page.keyboard.down('KeyA')

@@ -49,6 +49,8 @@ export class Enemy {
   private dodgeTimer = 0
   private dodgeCooldown = 0
   private dodgeVel = new THREE.Vector3()
+  private stunTimer = 0
+  private stunBadge: THREE.Mesh | null = null
   private knockback = new THREE.Vector3()
   private phase: AttackPhase = 'none'
   private phaseTimer = 0
@@ -212,6 +214,20 @@ export class Enemy {
     if (this.dead) return
     this.time += dt
     this.mixer?.update(dt)
+
+    if (this.stunTimer > 0) {
+      this.stunTimer = Math.max(0, this.stunTimer - dt)
+      if (this.stunBadge) {
+        this.stunBadge.visible = this.stunTimer > 0
+        this.stunBadge.rotation.z += dt * 5
+        this.stunBadge.scale.setScalar(1 + Math.sin(this.time * 12) * 0.12)
+        ;(this.stunBadge.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(this.time * 18) * 0.2
+      }
+      this.setGlow(this.stunTimer > 0 ? 0.45 + Math.sin(this.time * 18) * 0.2 : 0)
+      this.applyDisplay(dt)
+      return
+    }
+
     const spec = ENEMY_TYPES[this.type]
     this.attackCooldown = Math.max(0, this.attackCooldown - dt)
 
@@ -302,7 +318,7 @@ export class Enemy {
   /** 반사 회피: 플레이어가 나를 조준해 쏘면 짧게 옆으로 스텝 (Game이 사격 시 조준각 안의 적에 호출).
    *  항상 피하진 않음(랜덤 게이트) — 가끔 피해야 '읽고 반응'처럼 보이고 무적이 아님. */
   provokeDodge(shotDir: THREE.Vector3): void {
-    if (this.dead || this.phase !== 'none' || this.dodgeCooldown > 0 || this.dodgeTimer > 0) return
+    if (this.dead || this.isStunned || this.phase !== 'none' || this.dodgeCooldown > 0 || this.dodgeTimer > 0) return
     if (Math.random() > 0.6) return // ~60%만 반응
     const sign = Math.random() < 0.5 ? -1 : 1
     // 사격선에 수직으로 이탈 (탄이 오는 방향의 옆)
@@ -316,6 +332,40 @@ export class Enemy {
     return this.dodgeTimer > 0
   }
 
+  get isStunned(): boolean {
+    return this.stunTimer > 0
+  }
+
+  /** EMP 스턴 — 현재 공격과 이동 관성을 끊고 지정 시간 동안 완전히 정지한다. */
+  stun(seconds: number): void {
+    if (this.dead || seconds <= 0) return
+    this.stunTimer = Math.max(this.stunTimer, seconds)
+    this.phase = 'none'
+    this.phaseTimer = 0
+    this.lungeHit = false
+    this.dodgeTimer = 0
+    this.dodgeVel.set(0, 0, 0)
+    this.knockback.set(0, 0, 0)
+    this.setGlow(0)
+
+    if (!this.stunBadge) {
+      this.stunBadge = new THREE.Mesh(
+        new THREE.TorusGeometry(ENEMY_TYPES[this.type].radius * 1.2, 0.06, 6, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0x67e8f9,
+          transparent: true,
+          opacity: 0.75,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      )
+      this.stunBadge.rotation.x = Math.PI / 2
+      this.stunBadge.position.y = 0.16
+      this.root.add(this.stunBadge)
+    }
+    this.stunBadge.visible = true
+  }
+
   /** 공격 연출(예고/돌진) 중인지 — 분리력이 공격 라인을 밀어내지 않게 */
   get isAttacking(): boolean {
     return this.phase !== 'none'
@@ -323,13 +373,13 @@ export class Enemy {
 
   /** 분대 스태거용: 지금 공격을 개시할 준비가 됐는가 (범위·쿨다운·단계) */
   readyToAttack(playerPos: THREE.Vector3): boolean {
-    if (this.dead || this.phase !== 'none' || this.attackCooldown > 0 || this.dodgeTimer > 0) return false
+    if (this.dead || this.isStunned || this.phase !== 'none' || this.attackCooldown > 0 || this.dodgeTimer > 0) return false
     return this.pos.distanceTo(playerPos) <= ENEMY_TYPES[this.type].attackRange
   }
 
   /** mirror_dash: 플레이어의 대시를 감지해 같은 방향으로 돌진 (Game이 호출) */
   mirrorDash(dir: THREE.Vector3): void {
-    if (!this.has('mirror_dash') || this.dead || this.phase !== 'none') return
+    if (!this.has('mirror_dash') || this.dead || this.isStunned || this.phase !== 'none') return
     this.phase = 'lunge'
     this.phaseTimer = 0.3
     this.lungeDir.copy(dir).setY(0).normalize()
@@ -418,7 +468,8 @@ export class Enemy {
 
     // 애니메이션 상태: 공격 단계=attack, 그 외=이동(move) → 없으면 idle
     if (this.mixer) {
-      if (this.phase !== 'none') this.playClip(this.clips.attack ?? this.clips.move)
+      if (this.isStunned) this.playClip(this.clips.idle)
+      else if (this.phase !== 'none') this.playClip(this.clips.attack ?? this.clips.move)
       else this.playClip(this.clips.move ?? this.clips.idle)
     }
 
@@ -472,6 +523,7 @@ export class Enemy {
    * 피해 적용. attackerPos가 주어지고 shielded_front가 정면을 막으면 false(차단) 반환.
    */
   takeDamage(amount: number, knockDir?: THREE.Vector3, knockForce = 0, attackerPos?: THREE.Vector3): boolean {
+    if (this.dead) return false
     if (attackerPos && this.has('shielded_front')) {
       _toAttacker.copy(attackerPos).sub(this.pos).setY(0).normalize()
       if (_toAttacker.dot(this.facingDir) > SHIELD.blockDot) return false // 정면 차단(좁은 콘) — 등 뒤를 노려라

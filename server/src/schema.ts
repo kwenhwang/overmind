@@ -30,7 +30,7 @@ export const digestSchema = z.object({
    * 유일한 자유 문자열 입력 — 길이 제한 + 프롬프트에서 데이터로만 취급하도록 가드.
    */
   profile: z.string().max(600).default(''),
-  /** true면 웨이브가 아니라 보스전 설계를 요청 (웨이브 5 클리어 후) */
+  /** true면 웨이브가 아니라 보스전 설계를 요청 (웨이브 11 클리어 후) */
   boss: z.boolean().default(false),
 })
 
@@ -187,7 +187,7 @@ export const directiveTool = {
     properties: {
       spawns: {
         type: 'array',
-        description: '적 구성. 총합 3~12기 권장. drone=근접 돌격, spitter=원거리 견제, brute=저속 탱커',
+        description: '적 구성. 총합 최대 14기. drone=근접 돌격, spitter=원거리 견제, brute=저속 탱커',
         items: {
           type: 'object',
           properties: {

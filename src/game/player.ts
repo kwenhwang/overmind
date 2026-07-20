@@ -55,6 +55,10 @@ export class Player {
 
   private mats: THREE.MeshStandardMaterial[] = []
 
+  get hpPct(): number {
+    return Math.max(0, Math.min(100, (this.hp / this.stats.maxHp) * 100))
+  }
+
   constructor(scene: THREE.Scene) {
     this.bodyMat = new THREE.MeshStandardMaterial({
       color: 0x4ade80,
