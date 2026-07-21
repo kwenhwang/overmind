@@ -25,6 +25,12 @@
 |---|---|---|
 | boss.glb | Blender bpy 절차 생성 (자체) | AO를 버텍스 컬러로 베이크. 재현: `blender --background --python tools/blender/gen_assets.py` |
 
+## ③ 폰트 — Pretendard (SIL OFL 1.1)
+
+저작자 **길형진(orioncactus)** · https://github.com/orioncactus/pretendard
+라이선스 **SIL Open Font License 1.1** — 임베드·재배포 가능. 라이선스 전문 동봉: `src/ui/fonts/OFL.txt`.
+CDN 의존 없이 `src/ui/fonts/PretendardVariable.woff2`로 자가호스팅(오프라인 심사에서도 의도한 타이포 보장). 생성 AI 산출물 아님.
+
 ## 그 외
 
 사운드·이펙트·파티클·데미지 숫자·게임 로직·LLM 통합·셰이더는 **100% 자체 제작**
