@@ -145,8 +145,13 @@ export class Effects {
     const el = document.createElement('div')
     el.className = `dmg ${cls}`
     el.textContent = text
-    el.style.left = `${((v.x + 1) / 2) * innerWidth}px`
-    el.style.top = `${((1 - v.y) / 2) * innerHeight}px`
+    // 동시 히트가 한 점에 겹쳐 뭉치지 않게: 시작점을 약간 흩뿌리고(±12px),
+    // 서로 다른 수평 방향(±30px)으로 떠오르게 한다(--dx는 keyframe에서 사용).
+    const jx = (Math.random() - 0.5) * 24
+    const jy = (Math.random() - 0.5) * 16
+    el.style.left = `${((v.x + 1) / 2) * innerWidth + jx}px`
+    el.style.top = `${((1 - v.y) / 2) * innerHeight + jy}px`
+    el.style.setProperty('--dx', `${(Math.random() - 0.5) * 60}px`)
     this.numbersRoot.appendChild(el)
     setTimeout(() => el.remove(), 750)
   }

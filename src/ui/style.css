@@ -123,8 +123,8 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 .dmg.blocked { color: #60a5fa; font-size: 14px; }
 .dmg.player { color: #f87171; font-size: 21px; }
 @keyframes dmg-float {
-  from { opacity: 1; margin-top: 0; }
-  to { opacity: 0; margin-top: -46px; }
+  from { opacity: 1; transform: translate(-50%, -50%); }
+  to { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% - 46px)); }
 }
 
 #diag-btn {
