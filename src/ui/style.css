@@ -1,5 +1,5 @@
 /* 자가호스팅 Pretendard (SIL OFL 1.1) — CDN 의존 없이 오프라인 심사에서도 의도한 타이포 보장.
-   출처·라이선스: public/fonts/OFL.txt */
+   출처·라이선스: src/ui/fonts/OFL.txt */
 @font-face {
   font-family: 'Pretendard Variable';
   src: url('./fonts/PretendardVariable.woff2') format('woff2-variations');
