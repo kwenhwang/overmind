@@ -10,9 +10,9 @@
 | 파일 | 원본 모델 | poly.pizza |
 |---|---|---|
 | player.glb | Spaceship | poly.pizza/m/Jqfed124pQ |
-| drone.glb  | Robot Enemy Flying | poly.pizza/m/lF3jeRJwiH |
-| spitter.glb | Robot Enemy       | poly.pizza/m/1gNo5ezvmr |
-| brute.glb  | Robot Enemy Large  | poly.pizza/m/mPDR0L5uKx |
+| drone.glb  | Spaceship (눈 드론) | poly.pizza/m/u105mYHLHU |
+| spitter.glb | Turret Cannon (호버 터렛) | poly.pizza/m/mNJ6poH7Cp |
+| brute.glb  | Mech (2족 메크)  | poly.pizza/m/o3Ps8z8ByP |
 
 로드 시 게임 조명·머티리얼(`configureMaterial`)로 통일하고, 종류별 정체성 색·프레넬 림라이트를 주입한다.
 
