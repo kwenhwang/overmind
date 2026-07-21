@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { ARENA_RADIUS } from './config'
 
@@ -47,12 +48,12 @@ export class World {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFShadowMap
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap // 부드러운 접지 그림자 (PCF→PCFSoft)
     // 필름 톤매핑 — 발광부는 부드럽게 말리고 중간톤 대비가 살아남 (플랫한 로우폴리 인상 탈출의 1순위)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 0.98 // 블룸과 합쳐 흰 blowout 방지 (기존 1.05)
 
-    this.scene.background = new THREE.Color(0x07080c)
+    this.scene.background = this.makeSkyGradient() // 단색 대신 은은한 상하 그라디언트 (공간감·깊이)
     this.scene.fog = new THREE.Fog(0x07080c, 40, 95)
 
     // 환경맵 — 금속 재질(metalness)이 반사할 소스. 없으면 금속 모델이 새까맣게 렌더된다.
@@ -123,6 +124,9 @@ export class World {
     this.finalComposer.addPass(renderScene)
     this.finalComposer.addPass(mixPass)
     this.finalComposer.addPass(this.gradePass)
+    // 포스트-AA: 하드웨어 MSAA는 합성 결과(블룸·그레이드)를 커버 못 해 네온 엣지가 지글거림 →
+    // 최종 결과에 SMAA 1패스. 무인자 생성자(자체 사이징)라 finalComposer.setSize가 resize를 전파.
+    this.finalComposer.addPass(new SMAAPass())
 
     this.buildLights()
     this.buildArena()
@@ -140,6 +144,23 @@ export class World {
    * 종횡비 대응 — 세로가 납작한 창(예: 1518x466)에서 카메라 세로 시야가 좁아
    * 적이 위아래로 잘려 안 보이던 문제 해결. 납작할수록 카메라를 뒤로 물려 세로 확보.
    */
+  /** 은은한 상하 그라디언트 하늘 — near-black 톤만 써 포그(0x07080c)와 이음새 없이 깊이감만 더한다. */
+  private makeSkyGradient(): THREE.CanvasTexture {
+    const c = document.createElement('canvas')
+    c.width = 4
+    c.height = 256
+    const g = c.getContext('2d')!
+    const grd = g.createLinearGradient(0, 0, 0, 256)
+    grd.addColorStop(0, '#05060a') // 상단(먼 쪽) 가장 어둡게
+    grd.addColorStop(0.55, '#080b12')
+    grd.addColorStop(1, '#0b131d') // 하단(가까운 쪽) 살짝 청록 네이비
+    g.fillStyle = grd
+    g.fillRect(0, 0, 4, 256)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
+
   private applyViewport(): void {
     const aspect = innerWidth / innerHeight
     this.camera.aspect = aspect
