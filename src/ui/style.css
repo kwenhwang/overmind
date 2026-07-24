@@ -175,6 +175,8 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 
 @media (max-width: 720px) {
   #hp-wrap { width: 180px; height: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); left: calc(16px + env(safe-area-inset-left)); }
+  #observe { width: 180px; bottom: calc(38px + env(safe-area-inset-bottom)); left: calc(16px + env(safe-area-inset-left)); padding: 6px 8px 8px; }
+  #observe .observe-val { flex-basis: 42px; font-size: 10px; }
   #taunt { top: auto; bottom: calc(52px + env(safe-area-inset-bottom)); max-width: 88vw; font-size: 14px; }
   #report { min-width: 0; width: 88vw; font-size: 13px; }
   #screen h1 { font-size: 32px; }
@@ -293,6 +295,58 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 @keyframes emp-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes emp-ring { 0% { opacity: 1; width: 80px; height: 80px; } 100% { opacity: 0; width: 140vmax; height: 140vmax; border-width: 1px; } }
 
+/* ── 관측 패널 (좌하단) — 오버마인드가 나를 실시간 계측 중임을 상시 노출 ── */
+#observe {
+  position: absolute; left: calc(24px + env(safe-area-inset-left)); bottom: calc(46px + env(safe-area-inset-bottom));
+  width: 260px; padding: 8px 11px 10px; /* hp바(260px, bottom 24+14px)와 한 컬럼 스택 */
+  background: rgba(8,12,18,.82); border: 1px solid #1e3a4a; border-left: 3px solid #22d3ee; border-radius: 7px;
+  contain: layout paint; animation: observe-in .45s ease-out;
+}
+#observe[data-phase="idle"], #observe[data-phase="intermission"], #observe[data-phase="boss"] { opacity: .6; }
+.observe-kicker {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  font-size: 9px; letter-spacing: .24em; color: #67e8f9; margin-bottom: 4px;
+}
+#observe-status { letter-spacing: .08em; color: #b6d9e6; text-align: right; }
+.observe-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.observe-label { flex: 0 0 auto; min-width: 26px; font-size: 10px; letter-spacing: .18em; color: #67e8f9; }
+.observe-end { flex: 0 0 auto; font-size: 9px; color: #7d91a6; }
+.observe-val { flex: 0 0 48px; font-size: 11px; font-variant-numeric: tabular-nums; color: #b6d9e6; text-align: right; }
+.observe-track {
+  position: relative; flex: 1; height: 5px; border-radius: 99px; overflow: hidden;
+  background: rgba(28,42,54,.88); border: 1px solid rgba(89,135,155,.2);
+}
+.observe-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(125,211,252,.4); }
+.observe-fill {
+  position: absolute; top: 0; bottom: 0; left: 50%; width: 0;
+  background: linear-gradient(90deg, #38bdf8, #a5f3fc); box-shadow: 0 0 8px rgba(34,211,238,.55);
+  transition: left .18s ease-out, width .18s ease-out;
+}
+#observe.no-anim .observe-fill, #observe.no-anim #observe-redesign-bar { transition: none; }
+.observe-row.is-sampling { opacity: .45; }
+.observe-row.is-locked { animation: observe-lock .4s ease-out; }
+.observe-row.is-locked .observe-label { color: #ecfeff; text-shadow: 0 0 8px rgba(34,211,238,.85); }
+.observe-row.is-locked .observe-fill { box-shadow: 0 0 12px rgba(165,243,252,.9); }
+.observe-row.is-hot .observe-fill { background: linear-gradient(90deg, #22d3ee, #ecfeff); box-shadow: 0 0 14px rgba(165,243,252,.95); }
+.observe-redesign { display: flex; align-items: center; gap: 6px; margin-top: 7px; padding-top: 6px; border-top: 1px dashed #1e3a4a; }
+#observe-redesign-track {
+  position: relative; flex: 1; height: 5px; border-radius: 99px; overflow: hidden;
+  background: rgba(28,42,54,.88); border: 1px solid rgba(89,135,155,.2);
+}
+#observe-redesign-bar {
+  width: 0; height: 100%; background: linear-gradient(90deg, #38bdf8, #a5f3fc);
+  box-shadow: 0 0 10px rgba(34,211,238,.7); transition: width .18s ease-out;
+}
+#observe[data-phase="redesigning"] .observe-redesign .observe-label { animation: boot-pulse 1.25s ease-in-out infinite; }
+#observe[data-phase="boss"] .observe-redesign { display: none; }
+@keyframes observe-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes observe-lock { 0% { transform: scale(1.04); } 100% { transform: scale(1); } }
+/* 터치 기기 — 최대 편차 1행만 축약 표시 (조이스틱·하단 taunt와 시각 겹침 최소화) */
+@media (pointer: coarse) {
+  #observe .observe-row { display: none; }
+  #observe .observe-row.is-top { display: flex; }
+}
+
 /* ── 즉시 보이는 브랜드 부팅 화면 ─────────────────────────────────── */
 #screen::before {
   content: ''; position: absolute; inset: 0; z-index: -1; opacity: .18;
@@ -320,6 +374,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 @media (max-width: 520px) and (orientation: portrait) {
   #prediction { top: calc(52px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
   #prediction-label { font-size: 15px; }
+  #observe { width: 170px; left: calc(12px + env(safe-area-inset-left)); }
   #upgrades { width: min(340px, calc(100vw - 24px)); flex-direction: column; gap: 7px; }
   .upg-card { width: 100%; min-height: 78px; padding: 12px 38px 11px 12px; }
   .upg-card .upg-name { font-size: 15px; margin-bottom: 3px; }
@@ -348,6 +403,9 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #prediction { top: calc(46px + env(safe-area-inset-top)); width: 224px; padding: 8px 10px; }
   #prediction-label { font-size: 13px; }
   #prediction-source, #anomaly-readout { font-size: 9px; }
+  /* 720px 쿼리가 안 걸리는 가로모드 폰 사각지대 — 독립 축소 필수 (#taunt bottom 38px 충돌 구간) */
+  #observe { width: 170px; padding: 5px 8px 7px; }
+  #observe .observe-kicker { margin-bottom: 2px; }
   #taunt { top: auto; bottom: calc(38px + env(safe-area-inset-bottom)); padding: 6px 12px; }
   #report { top: 10%; padding: 9px 14px; }
   #report .report-pick { font-size: 19px; }
@@ -357,14 +415,17 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #score .score-num { font-size: 21px; }
   #wave-label { left: 12px; transform: none; letter-spacing: .18em; }
   #hp-wrap { width: 155px; }
+  #observe { width: 155px; }
   #screen h1 { font-size: 27px; }
   #screen p { max-width: 94vw; }
   #screen-btn { padding: 11px 32px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #hp-bar, #boss-bar, #anomaly-progress-bar { transition-duration: .01ms; }
-  #prediction::after, .brand-sigil, .boot-status { animation: none; }
+  #hp-bar, #boss-bar, #anomaly-progress-bar, .observe-fill, #observe-redesign-bar { transition-duration: .01ms; }
+  #prediction::after, .brand-sigil, .boot-status,
+  #observe[data-phase="redesigning"] .observe-redesign .observe-label { animation: none; }
   #anomaly-emp.emp-active::before, #anomaly-emp.emp-active .emp-ring,
-  #report .report-counter.reveal, .combo, .dmg, #hit-flash.on { animation-duration: .01ms; animation-iteration-count: 1; }
+  #report .report-counter.reveal, .combo, .dmg, #hit-flash.on,
+  #observe, .observe-row.is-locked { animation-duration: .01ms; animation-iteration-count: 1; }
 }

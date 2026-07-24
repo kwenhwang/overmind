@@ -13,6 +13,28 @@
   <div id="hit-flash"></div>
   <div id="hud" class="screen-open">
     <div id="hp-wrap" role="progressbar" aria-label="플레이어 체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="hp-bar"></div></div>
+    <section id="observe" class="hidden" aria-label="오버마인드 관측 패널">
+      <div class="observe-kicker">OVERMIND 관측<span id="observe-status" aria-live="polite">패턴 수집 대기</span></div>
+      <div class="observe-row is-sampling is-top" data-axis="dodge">
+        <span class="observe-label">회피</span><span class="observe-end" aria-hidden="true">좌</span>
+        <div class="observe-track" role="progressbar" aria-label="회피 좌우 성향" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="observe-mid" aria-hidden="true"></span><div class="observe-fill"></div></div>
+        <span class="observe-end" aria-hidden="true">우</span><span class="observe-val">—</span>
+      </div>
+      <div class="observe-row is-sampling" data-axis="weapon">
+        <span class="observe-label">무기</span><span class="observe-end" aria-hidden="true">근</span>
+        <div class="observe-track" role="progressbar" aria-label="무기 근접 원거리 성향" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="observe-mid" aria-hidden="true"></span><div class="observe-fill"></div></div>
+        <span class="observe-end" aria-hidden="true">원</span><span class="observe-val">—</span>
+      </div>
+      <div class="observe-row is-sampling" data-axis="zone">
+        <span class="observe-label">위치</span><span class="observe-end" aria-hidden="true">중</span>
+        <div class="observe-track" role="progressbar" aria-label="아레나 중앙 외곽 성향" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="observe-mid" aria-hidden="true"></span><div class="observe-fill"></div></div>
+        <span class="observe-end" aria-hidden="true">외</span><span class="observe-val">—</span>
+      </div>
+      <div class="observe-redesign">
+        <span class="observe-label">재설계</span>
+        <div id="observe-redesign-track" role="progressbar" aria-label="오버마인드 재설계 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="observe-redesign-bar"></div></div>
+      </div>
+    </section>
     <div id="wave-label"></div>
     <div id="boss-wrap" class="hidden">
       <div id="boss-name"></div>

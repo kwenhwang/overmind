@@ -1,5 +1,6 @@
 import type {
   AnomalyEvaluation,
+  BehaviorEvidence,
   PredictionContract,
   TelemetryDigest,
 } from '../ai/schema'
@@ -33,6 +34,117 @@ const EMP_GOALS: Record<PredictionTarget, string> = {
   unreadable: '균형 패턴 유지',
 }
 
+/* ── 관측 패널 (좌하단) — 텔레메트리 원시 관측의 실시간 가시화 ──────────
+ * 수치는 waveDigest(50 폴백 내장)와 buildPredictionContract 결과만 소비한다.
+ * 여기서 share를 다시 계산하면 인터미션 리포트·보스 habitBias와 어긋난다. */
+
+export type ObservationAxis = 'dodge' | 'weapon' | 'zone'
+export type ObservationPhase = 'idle' | 'observing' | 'redesigning' | 'ready' | 'intermission' | 'boss'
+
+export interface ObservationAxisView {
+  /** 좌측 항목(좌회피/근접/중앙) 점유율 0..100 — 표본 미달 시 50 */
+  leftPct: number
+  sampled: boolean
+  locked: boolean
+  hot: boolean
+}
+
+export interface ObservationView {
+  axes: Record<ObservationAxis, ObservationAxisView>
+  /** 편차 최대 축 — 모바일 1행 축약 표시용 */
+  topAxis: ObservationAxis
+  lockedAxis: ObservationAxis | null
+  lockedLabel: string
+  unreadable: boolean
+}
+
+const OBSERVE_AXES: readonly ObservationAxis[] = ['dodge', 'weapon', 'zone']
+/** 축별 [좌측 우세, 우측 우세] 수치 라벨 */
+const OBSERVE_SIDE: Record<ObservationAxis, [string, string]> = {
+  dodge: ['좌', '우'],
+  weapon: ['근', '원'],
+  zone: ['중', '외'],
+}
+const AXIS_OF_TARGET: Partial<Record<PredictionTarget, ObservationAxis>> = {
+  dodge_left: 'dodge', dodge_right: 'dodge',
+  melee: 'weapon', ranged: 'weapon',
+  center: 'zone', edge: 'zone',
+}
+const HABIT_SHORT: Partial<Record<PredictionTarget, string>> = {
+  dodge_left: '회피 좌', dodge_right: '회피 우',
+  melee: '근접 편중', ranged: '원거리 편중',
+  center: '중앙 밀집', edge: '외곽 체류',
+}
+
+export function observationView(
+  digest: TelemetryDigest,
+  evidence: BehaviorEvidence,
+  contract: PredictionContract | null,
+): ObservationView {
+  const dodgeTotal = evidence.dodgeLeftSeconds + evidence.dodgeRightSeconds
+  const weaponTotal = evidence.meleeDamage + evidence.rangedDamage
+  const zoneTotal = evidence.centerSeconds + evidence.edgeSeconds
+  const lockedAxis = contract ? (AXIS_OF_TARGET[contract.target] ?? null) : null
+  const mk = (axis: ObservationAxis, leftPct: number, sampled: boolean): ObservationAxisView => ({
+    leftPct,
+    sampled,
+    locked: lockedAxis === axis,
+    hot: sampled && Math.abs(leftPct - 50) >= 25,
+  })
+  const axes: Record<ObservationAxis, ObservationAxisView> = {
+    // 표본 플로어는 makeDigest와 동일 규칙 (dodge 합≥1s, weapon 합>0, zone 표집>0)
+    dodge: mk('dodge', digest.dodgeLeftPct, dodgeTotal >= 1),
+    weapon: mk('weapon', digest.meleeUsePct, weaponTotal > 0),
+    zone: mk('zone', Math.round((1 - digest.avgDistToCenter) * 100), zoneTotal > 0),
+  }
+  let topAxis: ObservationAxis = 'dodge'
+  let topDev = -1
+  for (const axis of OBSERVE_AXES) {
+    const a = axes[axis]
+    const dev = a.sampled ? Math.abs(a.leftPct - 50) : -1
+    if (dev > topDev) { topDev = dev; topAxis = axis }
+  }
+  return {
+    axes,
+    topAxis,
+    lockedAxis,
+    lockedLabel: contract ? (HABIT_SHORT[contract.target] ?? '') : '',
+    unreadable: contract?.target === 'unreadable',
+  }
+}
+
+export function observeStatusText(phase: ObservationPhase, view: ObservationView): string {
+  switch (phase) {
+    case 'idle': return '패턴 수집 대기'
+    // 전투 중에는 락 문구가 재설계 문구보다 우선 — '습관 포착'이 이 패널의 킬러 모먼트이고,
+    // 재설계 활동은 진행바 펄스가 이미 전달한다 (프리페치가 락보다 먼저 발화하는 웨이브 대응).
+    case 'observing':
+    case 'redesigning':
+    case 'ready':
+      if (view.lockedAxis) return `습관 포착 — ${view.lockedLabel}`
+      if (view.unreadable) return 'UNREADABLE — 균형 유지'
+      if (phase === 'redesigning') return '카운터 재설계 중'
+      if (phase === 'ready') return '재설계 수신'
+      return '패턴 수집 중'
+    case 'intermission': return '분석 반영 중'
+    case 'boss': return '프로파일 고정'
+  }
+}
+
+interface ObserveRowEls { row: HTMLElement; track: HTMLElement; fill: HTMLElement; val: HTMLElement }
+
+function collectObserveRows(): Partial<Record<ObservationAxis, ObserveRowEls>> {
+  const out: Partial<Record<ObservationAxis, ObserveRowEls>> = {}
+  for (const axis of OBSERVE_AXES) {
+    const row = document.querySelector<HTMLElement>(`#observe .observe-row[data-axis="${axis}"]`)
+    const track = row?.querySelector<HTMLElement>('.observe-track')
+    const fill = row?.querySelector<HTMLElement>('.observe-fill')
+    const val = row?.querySelector<HTMLElement>('.observe-val')
+    if (row && track && fill && val) out[axis] = { row, track, fill, val }
+  }
+  return out
+}
+
 export class Hud {
   private hpBar = $<HTMLDivElement>('hp-bar')
   private waveLabel = $<HTMLDivElement>('wave-label')
@@ -55,6 +167,20 @@ export class Hud {
   private empTimer: ReturnType<typeof setTimeout> | undefined
   private upgradeCleanup: (() => void) | undefined
   private predictionKey = ''
+  // 관측 패널 — 요소 부재 시 전부 no-op (오타 하나로 rAF 루프가 죽는 구조 방지)
+  private observe = document.getElementById('observe')
+  private observeStatus = document.getElementById('observe-status')
+  private observeRedesignTrack = document.getElementById('observe-redesign-track')
+  private observeRedesignBar = document.getElementById('observe-redesign-bar')
+  private observeRows = collectObserveRows()
+  /** dt 누산 스로틀 — setInterval은 record 프레임 스텝에서 발화하지 않으므로 금지 */
+  private observeAccum = 0
+  /** 0=없음 1=스냅 예약(다음 flush 무전환) 2=스냅 적용됨(다음 flush에서 해제) */
+  private observeSnapState: 0 | 1 | 2 = 0
+  private observeCache = {
+    axes: { dodge: '', weapon: '', zone: '' } as Record<ObservationAxis, string>,
+    status: '', phase: '', redesign: -1,
+  }
 
   setHp(pct: number): void {
     const safePct = Math.min(100, Math.max(0, pct))
@@ -331,11 +457,108 @@ export class Hud {
     this.upgradeCleanup = undefined
   }
 
-  /** 새 판 시작 시 이전 판의 예측·EMP 잔상을 모두 정리. */
+  /**
+   * 관측 패널 갱신 — 매 프레임 호출되지만 내부 0.15s 누산 스로틀로만 flush.
+   * 순수 표시 계층: 게임 상태를 읽기만 하고(인자로 수신) DOM 쓰기 외 부작용 없음.
+   */
+  tickObservation(
+    dt: number,
+    digest: TelemetryDigest,
+    evidence: BehaviorEvidence,
+    contract: PredictionContract | null,
+    redesignProgress: number,
+    phase: ObservationPhase,
+  ): void {
+    if (!this.observe || !this.observeStatus || !this.observeRedesignTrack || !this.observeRedesignBar) return
+    this.observeAccum += dt
+    if (this.observeAccum < 0.15 && this.observeSnapState !== 1) return
+    this.observeAccum = 0
+
+    this.observe.classList.remove('hidden')
+    if (this.observeSnapState === 1) {
+      this.observe.classList.add('no-anim') // 웨이브 시작 리셋을 미끄러짐 없이 스냅
+      this.observeSnapState = 2
+    } else if (this.observeSnapState === 2) {
+      this.observe.classList.remove('no-anim')
+      this.observeSnapState = 0
+    }
+
+    const view = observationView(digest, evidence, contract)
+    for (const axis of OBSERVE_AXES) {
+      const els = this.observeRows[axis]
+      if (!els) continue
+      const a = view.axes[axis]
+      const pct = a.sampled ? Math.round(Math.min(100, Math.max(0, a.leftPct))) : 50
+      const isTop = view.topAxis === axis
+      const key = `${pct}|${a.sampled}|${a.locked}|${a.hot}|${isTop}`
+      if (key === this.observeCache.axes[axis]) continue
+      this.observeCache.axes[axis] = key
+      const w = Math.abs(pct - 50)
+      els.fill.style.left = `${pct >= 50 ? 50 - w : 50}%`
+      els.fill.style.width = `${w}%`
+      const valText = a.sampled
+        ? `${OBSERVE_SIDE[axis][pct >= 50 ? 0 : 1]} ${Math.max(pct, 100 - pct)}%`
+        : '—'
+      els.val.textContent = valText
+      els.track.setAttribute('aria-valuenow', String(pct))
+      els.track.setAttribute('aria-valuetext', a.sampled ? valText : '표본 수집 중')
+      els.row.classList.toggle('is-sampling', !a.sampled)
+      els.row.classList.toggle('is-locked', a.locked)
+      els.row.classList.toggle('is-hot', a.hot)
+      els.row.classList.toggle('is-top', isTop)
+    }
+
+    const status = observeStatusText(phase, view)
+    if (status !== this.observeCache.status) {
+      this.observeCache.status = status
+      this.observeStatus.textContent = status
+    }
+    if (phase !== this.observeCache.phase) {
+      this.observeCache.phase = phase
+      this.observe.dataset.phase = phase
+    }
+    const rd = Math.round(Math.min(1, Math.max(0, redesignProgress)) * 100)
+    if (rd !== this.observeCache.redesign) {
+      this.observeCache.redesign = rd
+      this.observeRedesignBar.style.width = `${rd}%`
+      this.observeRedesignTrack.setAttribute('aria-valuenow', String(rd))
+    }
+  }
+
+  /** 웨이브 시작 직후 호출 — 통계 리셋(50 중앙 복귀)을 transition 없이 즉시 반영. */
+  snapObservation(): void {
+    this.observeSnapState = 1
+  }
+
+  private resetObservation(): void {
+    this.observeAccum = 0
+    this.observeSnapState = 0
+    this.observeCache = { axes: { dodge: '', weapon: '', zone: '' }, status: '', phase: '', redesign: -1 }
+    if (!this.observe) return
+    this.observe.classList.add('hidden')
+    this.observe.classList.remove('no-anim')
+    delete this.observe.dataset.phase
+    if (this.observeStatus) this.observeStatus.textContent = '패턴 수집 대기'
+    for (const axis of OBSERVE_AXES) {
+      const els = this.observeRows[axis]
+      if (!els) continue
+      els.row.className = `observe-row is-sampling${axis === 'dodge' ? ' is-top' : ''}`
+      els.fill.style.left = '50%'
+      els.fill.style.width = '0%'
+      els.track.setAttribute('aria-valuenow', '50')
+      els.track.setAttribute('aria-valuetext', '표본 수집 중')
+      els.val.textContent = '—'
+    }
+    if (this.observeRedesignBar) this.observeRedesignBar.style.width = '0%'
+    if (this.observeRedesignTrack) this.observeRedesignTrack.setAttribute('aria-valuenow', '0')
+  }
+
+  /** 새 판 시작 시 이전 판의 예측·EMP·관측 패널 잔상을 모두 정리. */
   resetTransient(): void {
     this.showPrediction(null)
     clearTimeout(this.empTimer)
     this.anomalyEmp.className = 'hidden'
+    this.resetObservation()
   }
 
   /**

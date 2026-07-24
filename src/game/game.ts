@@ -24,7 +24,7 @@ import { pickThree } from './upgrades'
 import type {
   AnomalyEvaluation, BossDesign, BossPhase, PredictionContract, TelemetryDigest, WaveDesign,
 } from '../ai/schema'
-import { Hud } from '../ui/hud'
+import { Hud, type ObservationPhase } from '../ui/hud'
 
 type State = 'title' | 'playing' | 'intermission' | 'bossIntro' | 'gameover' | 'victory'
 
@@ -411,6 +411,7 @@ export class Game {
     this.hud.showTaunt(design.taunt)
     sfx.taunt()
     this.telemetry.startWave()
+    this.hud.snapObservation() // 통계 리셋(→50 중앙)을 transition 미끄러짐 없이 반영
     this.combatStarted = false
     this.world.setMood(design.mood)
 
@@ -469,6 +470,30 @@ export class Game {
     sfx.anomaly()
     this.hud.setScore(this.score, this.combo)
     this.hud.showAnomalyEmp(bonus, target)
+  }
+
+  /**
+   * 관측 HUD용: 재설계(프리페치) 트리거까지의 진행률 0..1 — 순수 읽기, 부작용 0.
+   * 임계식은 updateCombat의 프리페치 조건과 동일해야 한다 (적 잔존 40% 이하).
+   */
+  private redesignProgress(): number {
+    if (this.prefetchedWave === this.wave) return 1 // 발화 완료 — 가득 유지
+    if (this.boss || this.state !== 'playing' || this.pendingSpawn !== null || this.waveEnemyCount === 0) return 0
+    const threshold = Math.max(2, Math.ceil(this.waveEnemyCount * 0.4))
+    const needed = this.waveEnemyCount - threshold
+    if (needed <= 0) return 1
+    // split_on_death로 enemies.length가 waveEnemyCount를 넘을 수 있어 clamp 필수
+    return Math.min(1, Math.max(0, (this.waveEnemyCount - this.enemies.length) / needed))
+  }
+
+  /** 관측 HUD용 상태 판정 — 보스전은 telemetry가 W11 값으로 동결되므로 '프로파일 고정'으로 정직 표시. */
+  private observationPhase(): ObservationPhase {
+    if (this.boss || this.state === 'bossIntro') return 'boss'
+    if (this.state === 'intermission') return 'intermission'
+    if (this.state !== 'playing' || !this.combatStarted) return 'idle'
+    if (this.prefetchedWave !== this.wave) return 'observing'
+    const arrived = this.wave >= TOTAL_WAVES ? this.bossDesign !== null : this.pendingDesign !== null
+    return arrived ? 'ready' : 'redesigning'
   }
 
   private clearPendingSpawn(): void {
@@ -753,6 +778,19 @@ export class Game {
 
     this.effects.update(combatDt)
     this.hud.setHp(this.player.hpPct)
+    // 관측 HUD — 순수 읽기(모든 telemetry API는 매 호출 새 객체) + 표시 push.
+    // raw dt(≠combatDt): 히트스톱 중에도 계측기 표시는 실시간 유지 (표시 전용이라 무해).
+    {
+      const obsEvidence = this.telemetry.currentEvidence()
+      this.hud.tickObservation(
+        dt,
+        this.telemetry.waveDigest(this.wave, this.player.hpPct),
+        obsEvidence,
+        buildPredictionContract(this.wave, obsEvidence),
+        this.redesignProgress(),
+        this.observationPhase(),
+      )
+    }
     this.world.followCamera(this.player.pos, dt)
     this.effects.applyShake(this.world.camera, dt)
     if (!this.noRender) this.world.render()
