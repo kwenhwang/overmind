@@ -73,8 +73,11 @@ async function callOpenAi(env: Env, digest: Digest): Promise<unknown> {
       json_schema: { name: parts.tool.name, strict: true, schema: openAiSchema(parts.tool) },
     },
   }
-  // gpt-5 계열 저지연 설정 — 미지원 모델이면 해당 파라미터 없이 1회 재시도
-  if (env.REASONING_EFFORT !== 'off') body.reasoning_effort = env.REASONING_EFFORT || 'none'
+  // gpt-5 계열 저지연 설정 — 비 reasoning 모델(gpt-4.1-nano 등)에 붙이면 매 호출이
+  // 400→재시도 2회 왕복이 되므로 계열을 보고 부착. 400 재시도는 안전망으로 유지.
+  const isReasoningModel = /^(gpt-5|o\d)/.test(String(body.model))
+  if (isReasoningModel && env.REASONING_EFFORT !== 'off')
+    body.reasoning_effort = env.REASONING_EFFORT || 'none'
 
   let res = await openAiFetch(env, body)
   if (res.status === 400 && 'reasoning_effort' in body) {

@@ -53,6 +53,33 @@ function overDailyBudget(max: number): boolean {
   return false
 }
 
+// LLM 열화 감시 — LLM계열 폴백(no_key·budget·llm_error·schema_mismatch·proxy_error)이
+// 연속되면 KV에 인시던트를 남기고 /health가 노출한다 (외부 가동감시가 키워드로 잡는 용도).
+// 아이솔레이트별 카운터라 근사치지만, 키 만료 같은 전역 장애는 모든 아이솔레이트에서 쌓인다.
+// 회복 시 플래그를 지우지 않는다(멀티 아이솔레이트 핑퐁 방지) — TTL 만료로 자연 해제.
+let llmFailStreak = 0
+let degradedPutAt = 0
+const LLM_DEGRADED = { key: 'stat:llm_degraded', after: 5, ttl: 21_600, refreshMs: 3_600_000 }
+
+async function noteLlmFallback(env: Env, reason: string): Promise<void> {
+  llmFailStreak++
+  if (llmFailStreak < LLM_DEGRADED.after) return
+  // 임계 도달 순간 1회 + 장애 지속 중 1h마다 갱신 — 저트래픽 장애도 TTL(6h)이 끊기지 않게
+  const now = Date.now()
+  if (llmFailStreak !== LLM_DEGRADED.after && now - degradedPutAt < LLM_DEGRADED.refreshMs) return
+  if (!env.DIAG) return
+  try {
+    await env.DIAG.put(
+      LLM_DEGRADED.key,
+      JSON.stringify({ at: new Date().toISOString(), reason, streak: llmFailStreak }),
+      { expirationTtl: LLM_DEGRADED.ttl },
+    )
+    degradedPutAt = now
+  } catch (err) {
+    console.error('llm_degraded_put_failed', err)
+  }
+}
+
 export function createApp(getEnv: (c: { env: unknown }) => Env) {
   const app = new Hono()
 
@@ -66,7 +93,20 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     })(c, next)
   })
 
-  app.get('/health', (c) => c.json({ ok: true }))
+  // llm 필드: 외부 가동감시(Uptime Kuma)가 '"llm":"ok"' 키워드 부재로 경보하는 용도
+  app.get('/health', async (c) => {
+    const env = getEnv(c)
+    // KV 없는 런타임(node 예비)에선 판별 불가 — 'ok' 오보 대신 'unknown'
+    let llm = 'unknown'
+    if (env.DIAG) {
+      try {
+        llm = (await env.DIAG.get(LLM_DEGRADED.key)) ? 'degraded' : 'ok'
+      } catch {
+        llm = 'unknown'
+      }
+    }
+    return c.json({ ok: true, llm })
+  })
 
   // 진단 캡처 업로드 — 게임 내 '진단 전송' 버튼이 화면(dataURL)+렌더 정보를 올림.
   // 개발자가 사용자 실기기 화면을 직접 확인하기 위한 통로 (최신본 'latest' 고정키).
@@ -120,7 +160,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   // 전역 리더보드 — 점수 제출/조회 (KV 'leaderboard', 상위 50 유지)
   app.post('/score', async (c) => {
     const env = getEnv(c)
-    if (!env.DIAG) return c.json({ ok: false })
+    if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
     const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number; version?: string } | null
     if (!body || typeof body.score !== 'number' || body.score < 0 || body.score > 1e7) {
       return c.json({ ok: false, reason: 'bad_score' }, 400)
@@ -134,13 +174,19 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
       at: Date.now(),
     }
     const key = `leaderboard:${version}`
-    const raw = await env.DIAG.get(key)
-    const board = raw ? (JSON.parse(raw) as (typeof entry)[]) : []
-    board.push(entry)
-    board.sort((a, b) => b.score - a.score)
-    const top = board.slice(0, 50)
-    await env.DIAG.put(key, JSON.stringify(top))
-    return c.json({ ok: true, rank: top.findIndex((e) => e === entry) + 1, total: board.length })
+    try {
+      const raw = await env.DIAG.get(key)
+      const board = raw ? (JSON.parse(raw) as (typeof entry)[]) : []
+      board.push(entry)
+      board.sort((a, b) => b.score - a.score)
+      const top = board.slice(0, 50)
+      await env.DIAG.put(key, JSON.stringify(top))
+      return c.json({ ok: true, rank: top.findIndex((e) => e === entry) + 1, total: board.length })
+    } catch (err) {
+      // 단일 키 리더보드는 KV 키당 1write/sec 제한에 동시 제출이 걸릴 수 있음 — 무음 유실 금지
+      console.error('score_kv_failed', err)
+      return c.json({ ok: false, reason: 'kv_write_failed' }, 503)
+    }
   })
   app.get('/leaderboard', async (c) => {
     const env = getEnv(c)
@@ -172,20 +218,34 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     const parsed = digestSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ fallback: true, reason: 'bad_input' }, 400)
 
-    if (!pickProvider(env)) return c.json({ fallback: true, reason: 'no_key' })
-    if (overDailyBudget(Number(env.MAX_DAILY_CALLS) || 2000))
+    if (!pickProvider(env)) {
+      await noteLlmFallback(env, 'no_key')
+      return c.json({ fallback: true, reason: 'no_key' })
+    }
+    if (overDailyBudget(Number(env.MAX_DAILY_CALLS) || 2000)) {
+      await noteLlmFallback(env, 'budget')
       return c.json({ fallback: true, reason: 'budget' })
+    }
 
     try {
       const raw = await callLlm(env, parsed.data)
+      if (raw === null) {
+        // llm.ts가 원인(401·빈 응답·JSON 파손)을 이미 console.error로 남긴 케이스.
+        // null을 스키마에 넣으면 schema_mismatch로 위장되므로 사유를 구분한다.
+        await noteLlmFallback(env, 'llm_error')
+        return c.json({ fallback: true, reason: 'llm_error' })
+      }
       const design = (parsed.data.boss ? bossDesignSchema : waveDesignSchema).safeParse(raw)
       if (!design.success) {
         console.error('schema_mismatch', JSON.stringify(raw)?.slice(0, 300))
+        await noteLlmFallback(env, 'schema_mismatch')
         return c.json({ fallback: true, reason: 'schema_mismatch' })
       }
+      llmFailStreak = 0
       return c.json({ ...design.data, fallback: false })
     } catch (err) {
       console.error('proxy_error', err)
+      await noteLlmFallback(env, 'proxy_error')
       return c.json({ fallback: true, reason: 'proxy_error' })
     }
   })
