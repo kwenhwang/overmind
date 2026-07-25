@@ -126,6 +126,15 @@ export class Game {
           wave: this.wave,
           damage: this.player?.damageBySource ?? {}, // 피해 출처별 누적 — 개발자 분석용
         }
+        // 캡처 이미지는 캔버스만 담아 DOM HUD 겹침을 못 보여줌 → 보이는 HUD 요소 rect 동봉
+        const hudRects: Record<string, number[]> = {}
+        for (const id of ['observe', 'hp-wrap', 'report', 'upgrades', 'prediction', 'taunt', 'intermission', 'score']) {
+          const el = document.getElementById(id)
+          if (!el || el.classList.contains('hidden')) continue
+          const r = el.getBoundingClientRect()
+          hudRects[id] = [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]
+        }
+        cap.info.hud = hudRects
         const ok = await uploadDiag(cap)
         diagBtn.textContent = ok ? '전송됨 ✓' : '전송 실패'
         diagBtn.classList.toggle('sent', ok)

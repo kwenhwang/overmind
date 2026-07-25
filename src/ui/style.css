@@ -411,6 +411,17 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #report .report-pick { font-size: 19px; }
 }
 
+/* 와이드·납작 창 (예: 1941×669, 1518×466) — 인터미션 스택(#report·재구성중·#upgrades)이
+   세로로 겹치는 문제: 리포트를 좌측 컬럼으로 빼고 안내문은 상단으로. 카드는 중앙 유지. */
+@media (min-width: 1200px) and (max-height: 760px) {
+  #report {
+    left: 24px; top: 46px; transform: none; min-width: 0; width: 300px; font-size: 13px;
+    max-height: calc(100vh - 216px); overflow: hidden; /* 하단 관측 패널·HP바 침범 방지 */
+  }
+  #report .report-pick { font-size: 20px; }
+  #intermission { top: 44px; transform: translate(-50%, 0); font-size: 15px; }
+}
+
 @media (max-width: 340px) {
   #score .score-num { font-size: 21px; }
   #wave-label { left: 12px; transform: none; letter-spacing: .18em; }
