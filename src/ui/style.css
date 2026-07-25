@@ -306,8 +306,12 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 .observe-kicker {
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
   font-size: 9px; letter-spacing: .24em; color: #67e8f9; margin-bottom: 4px;
+  white-space: nowrap; /* 좁은 폭에서 '관측'이 관/측으로 음절 분리되는 것 방지 */
 }
-#observe-status { letter-spacing: .08em; color: #b6d9e6; text-align: right; }
+#observe-status {
+  letter-spacing: .08em; color: #b6d9e6; text-align: right;
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; /* 넘치면 줄바꿈 대신 말줄임 */
+}
 .observe-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .observe-label { flex: 0 0 auto; min-width: 26px; font-size: 10px; letter-spacing: .18em; color: #67e8f9; }
 .observe-end { flex: 0 0 auto; font-size: 9px; color: #7d91a6; }
@@ -374,7 +378,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 @media (max-width: 520px) and (orientation: portrait) {
   #prediction { top: calc(52px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
   #prediction-label { font-size: 15px; }
-  #observe { width: 170px; left: calc(12px + env(safe-area-inset-left)); }
+  #observe { width: 220px; left: calc(12px + env(safe-area-inset-left)); }
   #upgrades { width: min(340px, calc(100vw - 24px)); flex-direction: column; gap: 7px; }
   .upg-card { width: 100%; min-height: 78px; padding: 12px 38px 11px 12px; }
   .upg-card .upg-name { font-size: 15px; margin-bottom: 3px; }
@@ -403,8 +407,9 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #prediction { top: calc(46px + env(safe-area-inset-top)); width: 224px; padding: 8px 10px; }
   #prediction-label { font-size: 13px; }
   #prediction-source, #anomaly-readout { font-size: 9px; }
-  /* 720px 쿼리가 안 걸리는 가로모드 폰 사각지대 — 독립 축소 필수 (#taunt bottom 38px 충돌 구간) */
-  #observe { width: 170px; padding: 5px 8px 7px; }
+  /* 720px 쿼리가 안 걸리는 가로모드 폰 사각지대 — 독립 축소 필수 (#taunt bottom 38px 충돌 구간)
+     220px = 키커('OVERMIND 관측'+status 한 줄)가 안 깨지는 최소 폭 */
+  #observe { width: 220px; padding: 5px 8px 7px; }
   #observe .observe-kicker { margin-bottom: 2px; }
   #taunt { top: auto; bottom: calc(38px + env(safe-area-inset-bottom)); padding: 6px 12px; }
   #report { top: 10%; padding: 9px 14px; }
@@ -420,6 +425,8 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   }
   #report .report-pick { font-size: 20px; }
   #intermission { top: 44px; transform: translate(-50%, 0); font-size: 15px; }
+  /* 와이드 데스크톱 납작 창은 가로 여유가 충분 — 가로모드(폰용) 축소를 되돌려 풀 폭 유지 */
+  #observe { width: 260px; }
 }
 
 @media (max-width: 340px) {
