@@ -1,12 +1,6 @@
 {
   "skillOverrides": {
-    "data-pipeline": "user-invocable-only",
-    "data-pipeline-test": "user-invocable-only",
-    "duckdb-query-opt": "user-invocable-only",
-    "fastapi-secure-api": "user-invocable-only",
     "infra-security": "user-invocable-only",
-    "pm-reporting": "user-invocable-only",
-    "tdd-workflow": "user-invocable-only",
     "README": "user-invocable-only",
     "c": "user-invocable-only",
     "d": "user-invocable-only",
