@@ -47,7 +47,16 @@ export interface WaveDesign {
   profileUpdate: string
   mood: 'confident' | 'angry' | 'playful' | 'desperate'
   aggression: 1 | 2 | 3 | 4 | 5
+  /**
+   * 이 설계가 어디서 왔는지 (클라이언트가 채우는 계측 필드 — LLM 출력 스키마에는 없다).
+   * 'llm': LLM 설계를 그대로 사용 / 'llm+adjusted': 지배 습관을 못 겨냥해 룰이 부품만 보충 /
+   * 'fallback': 프록시 불통·예산 초과로 규칙기반 설계.
+   * "LLM이 돌았는지 룰이 덮었는지" 사후 판별용 — 진단 덤프(__dbg·diag 업로드)에 노출된다.
+   */
+  source?: WaveDesignSource
 }
+
+export type WaveDesignSource = 'llm' | 'llm+adjusted' | 'fallback'
 
 /** 보스 공격 패턴 부품 — 결정론 구현 3종, LLM이 페이즈별로 프로파일에 맞춰 선택 */
 export type BossAttack = 'radial_burst' | 'targeted_slam' | 'charge'

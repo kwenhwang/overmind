@@ -67,6 +67,8 @@ export class Game {
   private wave = 0
   private intermissionTimer = 0
   private pendingDesign: WaveDesign | null = null
+  /** 웨이브별 설계 출처 기록 (llm / llm+adjusted / fallback) — 진단 덤프로 사후 판별 */
+  private designLog: string[] = []
   private pendingPrediction: PredictionContract | null = null
   private activePrediction: PredictionContract | null = null
   private anomalyTriggered = false
@@ -125,6 +127,8 @@ export class Game {
           hp: this.player?.hp ?? null,
           wave: this.wave,
           damage: this.player?.damageBySource ?? {}, // 피해 출처별 누적 — 개발자 분석용
+          designSource: this.pendingDesign?.source ?? null, // 대기 중 설계의 출처
+          designLog: this.designLog, // 웨이브별 설계 출처 이력 (LLM인지 룰 보정인지 폴백인지)
         }
         // 캡처 이미지는 캔버스만 담아 DOM HUD 겹침을 못 보여줌 → 보이는 HUD 요소 rect 동봉
         const hudRects: Record<string, number[]> = {}
@@ -155,9 +159,10 @@ export class Game {
         hp: this.player?.hp, enemies: this.enemies.length, score: this.score,
         boss: this.boss ? { hp: Math.round(this.boss.hp), phase: this.boss.phaseIndex } : null,
         design: this.pendingDesign
-          ? { bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
+          ? { source: this.pendingDesign.source ?? 'unknown', bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
           : null,
         prefetchedWave: this.prefetchedWave,
+        designLog: this.designLog, // 웨이브별 설계 출처 이력
         dodge: this.telemetry.debugDodge(),
         nearest: this.enemies.length && this.player ? Math.round(this.findNearestEnemy()?.pos.distanceTo(this.player.pos) ?? -1) : -1,
         proj: this.projectiles.list.length,
@@ -236,6 +241,7 @@ export class Game {
     this.waveRequestController = null
     this.bossRequestController = null
     this.endRunLocked = false
+    this.designLog = []
     this.combatStarted = false
     this.pendingWaveClear = false
     this.pendingPrediction = null
@@ -401,6 +407,8 @@ export class Game {
     const prefetchedDigest = this.prefetchedWave === this.wave ? this.prefetchedDigest : null
     const digest = prefetchedDigest ?? this.telemetry.waveDigest(this.wave, this.player.hpPct)
     const design = this.pendingDesign ?? fallbackDesign(digest)
+    // 이 웨이브 구성이 LLM 것인지·룰이 보충했는지·폴백인지 기록 (진단 덤프로 노출)
+    this.designLog.push(`W${this.wave + 1}:${design.source ?? 'unknown'}`)
     this.waveRequestController?.abort()
     this.waveRequestController = null
     this.pendingDesign = null // 소비 후 즉시 비움 — 다음 웨이브가 직전 stale 설계를 재사용하던 버그 차단
@@ -1187,6 +1195,7 @@ export class Game {
           hpLeft: Math.round(this.player.hp),
           mode: this.easy ? 'easy' : IS_TOUCH ? 'mobile' : 'desktop',
           damage: this.player.damageBySource,
+          designLog: this.designLog, // 판 전체의 웨이브별 설계 출처 — LLM 가동률 사후 집계
           build: __BUILD__,
           at: Date.now(),
         },

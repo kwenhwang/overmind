@@ -159,7 +159,7 @@ async function fetchWaveDesign(
       if (data.fallback) break // 서버 예산 캡 → 폴백
       if (signal?.aborted || !isCurrent()) return null
       if (persistProfile) memory.saveProfile(data.profileUpdate ?? '')
-      return sanitize(enforceDominantCounter(data, digest), digest.wave + 1)
+      return finalizeDesign(data, digest, 'llm')
     } catch {
       if (signal?.aborted || !isCurrent()) return null
       // 다음 엔드포인트로 페일오버
@@ -244,8 +244,8 @@ export function fallbackBossDesign(digest: TelemetryDigest): BossDesign {
 function sanitize(d: WaveDesign, wave: number): WaveDesign {
   const threatBudget = Math.min(5 + (wave - 1) * 1.5, 18)
   const unitCap = 14
-  const maxModsPerGroup = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
-  const maxHazards = wave <= 1 ? 0 : wave <= 3 ? 1 : 2
+  const maxModsPerGroup = maxModsForWave(wave)
+  const maxHazards = maxHazardsForWave(wave)
   const threatCost = { drone: 1, spitter: 1.25, brute: 2.5 } as const
 
   let remainingThreat = threatBudget
@@ -274,64 +274,170 @@ function sanitize(d: WaveDesign, wave: number): WaveDesign {
 
 const uniq = (a: Modifier[]): Modifier[] => [...new Set(a)]
 
+/** sanitize와 같은 웨이브별 상한 — 룰 보충이 상한에 잘려 '말만 하고 안 붙는' 것을 막기 위해 공유한다 */
+const maxModsForWave = (wave: number): number => (wave <= 1 ? 0 : wave <= 3 ? 1 : 2)
+const maxHazardsForWave = (wave: number): number => (wave <= 1 ? 0 : wave <= 3 ? 1 : 2)
+
+/** 텔레메트리에서 읽어낸 '가장 뚜렷한 습관 하나' */
+export type DominantHabit =
+  | { kind: 'dodge'; side: 'left' | 'right'; pct: number }
+  | { kind: 'melee'; pct: number }
+  | { kind: 'kite'; pct: number }
+
+/** 이 %p 미만의 편향은 습관으로 보지 않는다 (표본 잡음) */
+export const HABIT_DEV_THRESHOLD = 12
+
+const TYPE_KO: Record<string, string> = { drone: '드론', spitter: '스피터', brute: '브루트' }
+
 /**
- * 관찰→카운터 인과 보장 레이어 (LLM·폴백 공통 최종 단계).
- *
- * LLM이 창의적으로 조합하되, '가장 뚜렷한 습관 하나'는 반드시 그에 맞는 시그니처
- * 카운터로 반영되도록 강제한다 — LLM이 관찰을 흘려버려 "달라지는 게 없다"고 느껴지던
- * 문제의 근본 해결. counterReason도 실제 수치와 묶어 구체적으로 다시 쓴다.
- * (LLM은 여전히 구성·수량·2차 조합·대사·기억을 소유 — 이 레이어는 뼈대만 보장)
- *
- * 초반(웨이브 1)은 데이터가 적어 관측만 하고 개입하지 않는다.
+ * 지배 습관 판정. 웨이브 1은 데이터가 적어 관측만 하고 판정하지 않는다.
+ * 편향이 임계 미만이면 null — 룰은 아예 개입하지 않는다.
  */
-function enforceDominantCounter(d: WaveDesign, digest: TelemetryDigest): WaveDesign {
+export function dominantHabit(digest: TelemetryDigest): DominantHabit | null {
   const wave = digest.wave + 1
-  if (wave < 2) return d
+  if (wave < 2) return null
   const dodgeDev = Math.abs(digest.dodgeLeftPct - 50)
   const weaponDev = Math.abs(digest.meleeUsePct - 50)
-  // 편향이 미미하면(둘 다 <12%p) 개입하지 않고 LLM 설계를 존중
-  if (dodgeDev < 12 && weaponDev < 12) return d
-
-  const spawns = d.spawns.map((s) => ({ ...s, modifiers: [...(s.modifiers ?? [])] }))
-  let hazards = [...(d.hazards ?? [])]
-  let bias = d.spawnBias
-  let reason = d.counterReason
-
-  if (dodgeDev >= 12 && dodgeDev >= weaponDev) {
-    // 회피 방향 봉쇄 — 그쪽에 스폰 몰고 가시밭을 깐다 (도망갈 곳을 없앤다)
+  if (dodgeDev < HABIT_DEV_THRESHOLD && weaponDev < HABIT_DEV_THRESHOLD) return null
+  if (dodgeDev >= HABIT_DEV_THRESHOLD && dodgeDev >= weaponDev) {
     const left = digest.dodgeLeftPct > 50
-    const pct = Math.max(digest.dodgeLeftPct, digest.dodgeRightPct)
-    bias = left ? 'left' : 'right'
-    hazards = hazards.filter((h) => h.placement !== 'player_left' && h.placement !== 'player_right')
-    hazards.unshift({ type: 'spike_zone', placement: left ? 'player_left' : 'player_right' })
-    reason = `회피 ${left ? '왼쪽' : '오른쪽'} ${pct}% — 그쪽을 가시로 봉쇄한다`
-  } else if (digest.meleeUsePct > 50) {
-    // 근접 집착 — '방패맨' 브루트가 정면을 막아 후방 침투를 강요 + 다른 유닛의 가시로 밀착 처벌 (방패↔가시 상호보완)
-    let brute = spawns.find((s) => s.type === 'brute')
-    if (!brute && spawns[0]) {
-      spawns[0].type = 'brute'
-      brute = spawns[0]
+    return { kind: 'dodge', side: left ? 'left' : 'right', pct: Math.max(digest.dodgeLeftPct, digest.dodgeRightPct) }
+  }
+  if (digest.meleeUsePct > 50) return { kind: 'melee', pct: digest.meleeUsePct }
+  return { kind: 'kite', pct: digest.rangedUsePct }
+}
+
+/**
+ * 설계가 이미 그 습관을 겨냥했는가 — 룰의 '거부권' 판정.
+ * 겨냥했으면 룰은 손대지 않는다(LLM이 어떤 부품 조합으로 겨냥했든 존중).
+ * 런타임에 실제로 발동하는 조합만 인정한다 — 예: shielded_front는 브루트에만 붙어야
+ * 효과가 있다(enemies.ts 생성자가 그 외 타입에선 제거). 그래야 화면 문구가 거짓이 되지 않는다.
+ */
+export function addressesHabit(d: WaveDesign, habit: DominantHabit): boolean {
+  const mods = new Set<Modifier>(d.spawns.flatMap((s) => s.modifiers ?? []))
+  const hazards = d.hazards ?? []
+  const hasUnits = d.spawns.some((s) => s.count > 0)
+  switch (habit.kind) {
+    case 'dodge': {
+      // 회피 편향: 그쪽으로 스폰을 몰았거나 · 그쪽에 해저드를 깔았거나 · 회피 자체에 반응하는 mirror_dash
+      const placement = habit.side === 'left' ? 'player_left' : 'player_right'
+      return (
+        (d.spawnBias === habit.side && hasUnits) ||
+        hazards.some((h) => h.placement === placement) ||
+        (mods.has('mirror_dash') && hasUnits)
+      )
     }
-    if (brute) brute.modifiers = uniq([...brute.modifiers, 'shielded_front'])
-    const other = spawns.find((s) => s !== brute)
-    if (other) other.modifiers = uniq([...other.modifiers, 'thorns'])
-    reason = `근접 집착 ${digest.meleeUsePct}% — 방패맨은 뒤를 노리고, 밀착은 가시로 처벌한다`
-  } else {
-    // 카이팅(거리 유지) — 멀수록 가속하는 돌격 유닛으로 거리를 좁힌다
-    let hasDrone = false
-    for (const s of spawns)
-      if (s.type === 'drone') {
-        s.modifiers = uniq([...s.modifiers, 'enrage_far'])
-        hasDrone = true
-      }
-    if (!hasDrone && spawns[0]) {
-      spawns[0].type = 'drone'
-      spawns[0].modifiers = uniq([...spawns[0].modifiers, 'enrage_far'])
+    case 'melee':
+      // 근접 집착: 정면 차단(브루트 한정) · 밀착 반격 가시 · 근접 처치 처벌 자폭
+      return d.spawns.some(
+        (s) =>
+          s.count > 0 &&
+          ((s.type === 'brute' && (s.modifiers ?? []).includes('shielded_front')) ||
+            (s.modifiers ?? []).some((m) => m === 'thorns' || m === 'explode_on_death')),
+      )
+    case 'kite':
+      // 거리 유지: 멀수록 가속하는 추격
+      return d.spawns.some((s) => s.count > 0 && (s.modifiers ?? []).includes('enrage_far'))
+  }
+}
+
+/** 상한을 지키면서 모디파이어를 붙인다 — 이미 상한이면 마지막 것을 밀어내 우리 것이 반드시 살아남게 한다 */
+function attachModifier(group: { modifiers?: Modifier[] }, mod: Modifier, maxMods: number): boolean {
+  if (maxMods <= 0) return false
+  const mods = uniq(group.modifiers ?? [])
+  if (mods.includes(mod)) return true
+  if (mods.length >= maxMods) mods.splice(maxMods - 1)
+  mods.push(mod)
+  group.modifiers = mods
+  return true
+}
+
+/**
+ * 최소 개입 — 빗나간 설계에 '빠진 카운터 부품'만 보충한다.
+ * 전면 재구성(적 타입 교체·해저드 전멸)은 하지 않는다. 실제로 보충한 내용을 note로 돌려주어
+ * 화면 문구가 실제 구성과 어긋나지 않게 한다. 보충할 자리가 없으면 null(개입 없음).
+ */
+function patchMissingCounter(d: WaveDesign, habit: DominantHabit, wave: number): { design: WaveDesign; note: string } | null {
+  const spawns = d.spawns.map((s) => ({ ...s, modifiers: [...(s.modifiers ?? [])] }))
+  const maxMods = maxModsForWave(wave)
+  const live = spawns.filter((s) => s.count > 0)
+
+  if (habit.kind === 'dodge') {
+    const placement = habit.side === 'left' ? 'player_left' : 'player_right'
+    const opposite = habit.side === 'left' ? 'player_right' : 'player_left'
+    // 반대쪽에 깔린 해저드만 정정하고 나머지 LLM 해저드는 그대로 둔다
+    const hazards = (d.hazards ?? []).filter((h) => h.placement !== opposite)
+    const added: string[] = []
+    let bias = d.spawnBias
+    if (bias !== habit.side && live.length) {
+      bias = habit.side
+      added.push('스폰을 그쪽으로')
     }
-    reason = `거리 유지 ${digest.rangedUsePct}% — 멀수록 가속하는 돌격으로 좁힌다`
+    if (!hazards.some((h) => h.placement === placement) && maxHazardsForWave(wave) > 0) {
+      hazards.unshift({ type: 'spike_zone', placement })
+      added.push('가시 봉쇄')
+    }
+    if (!added.length) return null
+    return {
+      design: { ...d, spawns, hazards, spawnBias: bias },
+      note: `회피 ${habit.side === 'left' ? '왼쪽' : '오른쪽'} ${habit.pct}% — ${added.join('·')} 보강`,
+    }
   }
 
-  return { ...d, spawns, hazards: hazards.slice(0, 2), spawnBias: bias, counterReason: reason }
+  if (habit.kind === 'melee') {
+    // 방패는 브루트에만 유효 — 브루트가 있으면 방패, 없으면 선두 그룹에 가시(타입은 바꾸지 않는다)
+    const brute = live.find((s) => s.type === 'brute')
+    if (brute && attachModifier(brute, 'shielded_front', maxMods)) {
+      return { design: { ...d, spawns }, note: `근접 ${habit.pct}% — 브루트에 정면 방패 부착` }
+    }
+    const target = live[0]
+    if (target && attachModifier(target, 'thorns', maxMods)) {
+      return { design: { ...d, spawns }, note: `근접 ${habit.pct}% — ${TYPE_KO[target.type] ?? target.type}에 반격 가시 부착` }
+    }
+    return null
+  }
+
+  // 카이팅 — 드론이 있으면 드론 전체, 없으면 선두 그룹에 가속 추격
+  const drones = live.filter((s) => s.type === 'drone')
+  const targets = drones.length ? drones : live.slice(0, 1)
+  let attached = false
+  for (const t of targets) attached = attachModifier(t, 'enrage_far', maxMods) || attached
+  if (!attached) return null
+  return {
+    design: { ...d, spawns },
+    note: `거리 유지 ${habit.pct}% — ${drones.length ? '드론' : TYPE_KO[targets[0].type] ?? targets[0].type}에 가속 추격 부착`,
+  }
+}
+
+/**
+ * 설계 최종화 (LLM·폴백 공통).
+ *
+ * 과거엔 편향이 큰 순간마다 룰이 구성·해저드·화면 문구까지 전부 덮어써서, 플레이어가
+ * 습관을 보일수록 오버마인드가 룰 템플릿 3~5개만 반복하는 '스크립트'가 됐다.
+ * 지금은 거부권 모델이다 — LLM 설계가 지배 습관을 이미 겨냥했으면 그대로 통과시키고,
+ * 빗나갔을 때만 빠진 부품을 보충한다. LLM의 counterReason은 절대 지우지 않고,
+ * 룰이 실제로 손댔을 때만 그 사실을 짧게 덧붙인다(화면 문구 = 실제 구성).
+ */
+function finalizeDesign(raw: WaveDesign, digest: TelemetryDigest, origin: 'llm' | 'fallback'): WaveDesign {
+  const wave = digest.wave + 1
+  const baseSource: WaveDesign['source'] = origin === 'fallback' ? 'fallback' : 'llm'
+  // 상한(적 수·모디파이어·해저드)을 먼저 적용해야, 이후 판정이 '실제로 나갈 구성'을 본다
+  const clamped = sanitize(raw, wave)
+  const habit = dominantHabit(digest)
+  if (!habit || addressesHabit(clamped, habit)) return { ...clamped, source: baseSource }
+
+  const patched = patchMissingCounter(clamped, habit, wave)
+  if (!patched) return { ...clamped, source: baseSource }
+  // 보충분을 포함해 난이도 상한을 다시 적용 (모디파이어 비용만큼 수량이 조정된다)
+  const final = sanitize(patched.design, wave)
+  // 보충이 상한에 잘려 살아남지 못했다면 개입 사실을 주장하지 않는다 (도구는 거짓말하지 않는다)
+  if (!addressesHabit(final, habit)) return { ...final, source: baseSource }
+  const llmReason = origin === 'llm' ? (raw.counterReason ?? '').trim() : ''
+  return {
+    ...final,
+    source: origin === 'fallback' ? 'fallback' : 'llm+adjusted',
+    counterReason: llmReason ? `${llmReason} (룰 보정: ${patched.note})` : patched.note,
+  }
 }
 
 /**
@@ -353,25 +459,27 @@ export function fallbackDesign(digest: TelemetryDigest): WaveDesign {
       ]
   const dodgeLeft = digest.dodgeLeftPct > 60
   const dodgeRight = digest.dodgeRightPct > 60
+  const dodgeSpike = wave >= 3 && (dodgeLeft || dodgeRight)
   const base: WaveDesign = {
     spawns,
     // 방향 가시는 회피 편향이 뚜렷할 때만 (중립인데 엉뚱한 방향에 가시 까는 것 방지)
-    hazards:
-      wave >= 3 && (dodgeLeft || dodgeRight)
-        ? [{ type: 'spike_zone', placement: dodgeLeft ? 'player_left' : 'player_right' }]
-        : [],
-    spawnBias: dodgeLeft ? 'left' : digest.dodgeRightPct > 60 ? 'right' : 'surround',
-    counterReason: melee
-      ? '근접 위주 전투 감지 — 원거리 유닛으로 거리를 벌린다'
-      : '원거리 위주 전투 감지 — 돌격 유닛으로 압박한다',
+    hazards: dodgeSpike ? [{ type: 'spike_zone', placement: dodgeLeft ? 'player_left' : 'player_right' }] : [],
+    spawnBias: dodgeLeft ? 'left' : dodgeRight ? 'right' : 'surround',
+    // 폴백 문구는 '실제로 한 것'만 말한다 — 회피 편향을 실제로 겨냥한 판에서만 그 문장을 쓴다
+    counterReason:
+      dodgeLeft || dodgeRight
+        ? `회피 ${dodgeLeft ? '왼쪽' : '오른쪽'} ${dodgeLeft ? digest.dodgeLeftPct : digest.dodgeRightPct}% — 그쪽으로 몰아붙인다${dodgeSpike ? ' + 가시 봉쇄' : ''}`
+        : melee
+          ? '근접 위주 전투 감지 — 원거리 유닛으로 거리를 벌린다'
+          : '원거리 위주 전투 감지 — 돌격 유닛으로 압박한다',
     taunt: TAUNT_POOL[wave % TAUNT_POOL.length],
     profileUpdate: '', // 폴백은 기억을 갱신하지 않음 (기존 프로파일 유지)
     mood: digest.playerHpPct < 35 ? 'confident' : 'angry',
     aggression: Math.min(5, 3 + Math.floor(wave / 2)) as WaveDesign['aggression'], // 공격성 상향
   }
-  // 폴백도 LLM 경로와 동일하게 sanitize(적 수·모디파이어 상한) → 인과 보장 레이어를 거친다.
-  // (sanitize 누락으로 폴백만 후반 웨이브 상한을 넘던 것 수정 — 모바일 성능·일관성)
-  return sanitize(enforceDominantCounter(base, digest), wave)
+  // 폴백도 LLM 경로와 동일하게 상한(적 수·모디파이어) → 거부권 레이어를 거친다.
+  // 폴백엔 LLM 문장이 없으므로 룰이 보충하면 문구도 룰 것으로 대체된다(거짓말 없음).
+  return finalizeDesign(base, digest, 'fallback')
 }
 
 const TAUNT_POOL = [
