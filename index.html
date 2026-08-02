@@ -41,9 +41,12 @@
       <div id="boss-bar-bg" role="progressbar" aria-label="보스 체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="boss-bar"></div></div>
     </div>
     <div id="taunt" class="hidden" aria-live="polite"></div>
-    <div id="intermission" class="hidden"></div>
-    <div id="report" class="hidden"></div>
-    <div id="upgrades" class="hidden"></div>
+    <!-- 인터미션 스택 — 셋을 세로 flex로 묶어 겹침을 구조적으로 차단(고정 % 위치 금지) -->
+    <div id="mid-stack">
+      <div id="report" class="hidden"></div>
+      <div id="intermission" class="hidden"></div>
+      <div id="upgrades" class="hidden"></div>
+    </div>
     <section id="prediction" class="hidden" aria-label="오버마인드 예측">
       <div class="prediction-kicker">AI 예측 · 반대로 행동하면 EMP</div>
       <div id="prediction-label"></div>

@@ -48,10 +48,24 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   background: rgba(12, 10, 8, .72); border: 1px solid #5a4632; border-radius: 8px;
   text-shadow: 0 0 12px rgba(255, 140, 40, .35);
 }
+/* 인터미션 스택 — #report·#intermission·#upgrades를 세로 flex로 흘린다.
+   셋을 각자 고정 %(16%·42%·50%)에 두면 리포트 높이가 내용에 따라 변해 반드시 겹친다
+   (2026-08-03 실측: 표준 16뷰포트 × 4상태 중 29건 겹침, 1920×1080·1366×768 포함).
+   상하 패딩은 웨이브 라벨(위)·HP바/관측 패널(아래) 침범 방지선. */
+#mid-stack {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; /* safe 키워드 미지원 구형 브라우저 폴백 */
+  justify-content: safe center;
+  gap: 16px; padding: 64px 12px 92px;
+  /* 초소형 화면에선 리포트+카드가 물리적으로 안 들어간다 — 잘라 삼키지 말고 스크롤로 넘긴다
+     (safe center: 넘칠 때 위쪽이 잘리는 flex 중앙정렬 함정 방지) */
+  overflow-y: auto; overscroll-behavior: contain;
+}
 #intermission {
-  position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%);
   font-size: 22px; letter-spacing: .2em; color: #7dd3fc; text-align: center;
   text-shadow: 0 0 16px rgba(56, 189, 248, .5);
+  flex: 0 0 auto;
 }
 .hidden { display: none !important; }
 
@@ -62,7 +76,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 #hud { z-index: 2; }
 
 #report {
-  position: absolute; top: 16%; left: 50%; transform: translate(-50%, 0);
+  flex: 0 0 auto;
   min-width: 320px; max-width: 560px; padding: 14px 22px;
   background: rgba(8, 12, 18, .82); border: 1px solid #1e3a4a; border-radius: 10px;
   font-size: 14px; line-height: 1.8; color: #a8c8d8;
@@ -137,8 +151,9 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
 @media (max-width: 720px) { #diag-btn { padding: 14px 20px; font-size: 16px; } }
 
 #upgrades {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  position: relative; flex: 0 0 auto;
   display: flex; align-items: stretch; gap: 14px; width: max-content; max-width: calc(100vw - 32px);
+  padding-top: 30px; /* .upg-hint가 이 안에 들어앉게 자리를 예약 — 밖에 띄우면 위 요소와 겹친다 */
   pointer-events: auto; z-index: 6;
 }
 .upg-card {
@@ -157,7 +172,7 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   border: 1px solid rgba(125,211,252,.42); border-radius: 5px; color: #7dd3fc; font-size: 11px;
 }
 .upg-hint {
-  position: absolute; left: 50%; top: -46px; transform: translateX(-50%); width: max-content; max-width: 90vw;
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: max-content; max-width: 90vw;
   color: #7dd3fc; font-size: 15px; font-weight: 700; letter-spacing: .1em; text-align: center;
   text-shadow: 0 0 12px rgba(56,189,248,.5);
 }
@@ -379,11 +394,11 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #prediction { top: calc(52px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
   #prediction-label { font-size: 15px; }
   #observe { width: 220px; left: calc(12px + env(safe-area-inset-left)); }
-  #upgrades { width: min(340px, calc(100vw - 24px)); flex-direction: column; gap: 7px; }
+  #upgrades { width: min(340px, calc(100vw - 24px)); flex-direction: column; gap: 7px; padding-top: 24px; }
   .upg-card { width: 100%; min-height: 78px; padding: 12px 38px 11px 12px; }
   .upg-card .upg-name { font-size: 15px; margin-bottom: 3px; }
   .upg-card .upg-desc { font-size: 12px; }
-  .upg-hint { top: -34px; font-size: 12px; }
+  .upg-hint { font-size: 12px; }
   #screen { gap: 12px; }
   #screen h1 { font-size: 30px; letter-spacing: .18em; padding-left: .18em; }
   #board-wrap { width: min(420px, 94vw); padding: 12px; }
@@ -401,9 +416,9 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   .brand-sigil::before { width: 26px; height: 26px; }
   .brand-sigil::after { width: 11px; height: 11px; }
   .brand-sigil span { width: 38px; }
-  #upgrades { top: 55%; width: min(92vw, 640px); }
+  #upgrades { width: min(92vw, 640px); padding-top: 22px; }
   .upg-card { flex: 1; width: auto; min-height: 90px; padding: 13px 8px 9px; }
-  .upg-hint { top: -28px; font-size: 11px; }
+  .upg-hint { font-size: 11px; }
   #prediction { top: calc(46px + env(safe-area-inset-top)); width: 224px; padding: 8px 10px; }
   #prediction-label { font-size: 13px; }
   #prediction-source, #anomaly-readout { font-size: 9px; }
@@ -412,19 +427,19 @@ body { font-family: 'Pretendard Variable', Pretendard, system-ui, sans-serif; co
   #observe { width: 220px; padding: 5px 8px 7px; }
   #observe .observe-kicker { margin-bottom: 2px; }
   #taunt { top: auto; bottom: calc(38px + env(safe-area-inset-bottom)); padding: 6px 12px; }
-  #report { top: 10%; padding: 9px 14px; }
+  #report { padding: 9px 14px; }
   #report .report-pick { font-size: 19px; }
+  #mid-stack { padding: 44px 12px 56px; gap: 10px; }
 }
 
-/* 와이드·납작 창 (예: 1941×669, 1518×466) — 인터미션 스택(#report·재구성중·#upgrades)이
-   세로로 겹치는 문제: 리포트를 좌측 컬럼으로 빼고 안내문은 상단으로. 카드는 중앙 유지. */
+/* 와이드·납작 창 (예: 1941×669, 1518×466) — 세로 여유가 없으니 타이포만 줄인다.
+   겹침 자체는 #mid-stack 세로 flex가 구조적으로 막으므로, 예전처럼 리포트를 좌측 컬럼으로
+   빼내지 않는다(그 우회가 width:300px·overflow:hidden으로 리포트를 되레 잘라먹었다). */
 @media (min-width: 1200px) and (max-height: 760px) {
-  #report {
-    left: 24px; top: 46px; transform: none; min-width: 0; width: 300px; font-size: 13px;
-    max-height: calc(100vh - 216px); overflow: hidden; /* 하단 관측 패널·HP바 침범 방지 */
-  }
+  #report { font-size: 13px; padding: 10px 16px; }
   #report .report-pick { font-size: 20px; }
-  #intermission { top: 44px; transform: translate(-50%, 0); font-size: 15px; }
+  #intermission { font-size: 15px; }
+  #mid-stack { padding: 46px 12px 60px; gap: 10px; }
   /* 와이드 데스크톱 납작 창은 가로 여유가 충분 — 가로모드(폰용) 축소를 되돌려 풀 폭 유지 */
   #observe { width: 260px; }
 }
