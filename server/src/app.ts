@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { digestSchema, waveDesignSchema, bossDesignSchema } from './schema'
 import { callLlm, pickProvider } from './llm'
@@ -19,6 +19,12 @@ export interface Env {
   MAX_DAILY_CALLS?: string
   /** 세션 토큰 HMAC 서명 키. 미설정 시 토큰 검증 생략(하위호환) */
   SESSION_SECRET?: string
+  /**
+   * 진단·에셋·RL 데이터 **조회**용 개발자 키 (2026-08-04 보안 감사).
+   * 미설정이면 조회 라우트는 열리지 않고 503을 낸다 — 하위호환으로 열어두면
+   * 설정을 깜빡한 배포가 곧 유출이라, 여기서는 fail-closed가 맞다.
+   */
+  DIAG_KEY?: string
   /** 진단 캡처 저장 KV (게임 내 진단 버튼 업로드) */
   DIAG?: {
     put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
@@ -108,11 +114,33 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return c.json({ ok: true, llm })
   })
 
+  // ── 진단·에셋·RL KV (2026-08-04 보안 감사) ────────────────────────────────
+  // 비대칭 설계인 이유를 적어둔다:
+  //   업로드(POST)는 **브라우저**가 부른다(게임 내 '진단 전송' 버튼, 뷰어의 '서버로
+  //   전송'). 클라이언트에 넣은 시크릿은 시크릿이 아니므로 POST에 키를 걸 수 없다 —
+  //   대신 기존 per-IP 리미터로 도배를 막는다.
+  //   조회(GET)는 **개발자만** curl로 부른다. 여기가 진짜 구멍이었다: /diag GET이
+  //   사용자 실기기 화면 캡처(dataURL)를 인증 없이 아무에게나 내주고 있었고,
+  //   워커 URL은 배포 번들에 하드코딩(src/ai/director.ts)돼 있어 누구나 안다.
+  //   그래서 GET만 DIAG_KEY로 잠근다.
+  const requireDiagKey = (c: Context) => {
+    const env = getEnv(c)
+    if (!env.DIAG_KEY) return c.json({ ok: false, reason: 'diag_key_unset' }, 503)
+    if (c.req.header('x-diag-key') !== env.DIAG_KEY) {
+      return c.json({ ok: false, reason: 'unauthorized' }, 401)
+    }
+    return null
+  }
+
+  // 업로드 도배 방지 — LLM 경로와 같은 per-IP 창을 쓴다(별도 예산이 아니라 남용 방지).
+  const uploadThrottled = (c: Context) =>
+    rateLimited(`upload:${c.req.header('cf-connecting-ip') ?? 'unknown'}`)
+
   // 진단 캡처 업로드 — 게임 내 '진단 전송' 버튼이 화면(dataURL)+렌더 정보를 올림.
-  // 개발자가 사용자 실기기 화면을 직접 확인하기 위한 통로 (최신본 'latest' 고정키).
   app.post('/diag', async (c) => {
     const env = getEnv(c)
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text() // {img, info} JSON 문자열 (최대 ~수백KB)
     if (body.length > 20 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('latest', body, { expirationTtl: 86400 })
@@ -120,6 +148,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   })
 
   app.get('/diag', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
@@ -130,6 +160,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   app.post('/model', async (c) => {
     const env = getEnv(c)
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text() // {slot, name, glb(base64)} JSON
     if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('model-latest', body, { expirationTtl: 86400 })
@@ -137,6 +168,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   })
 
   app.get('/model', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('model-latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
@@ -146,12 +179,15 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   app.post('/rl', async (c) => {
     const env = getEnv(c)
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text()
     if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('rl-latest', body, { expirationTtl: 604800 }) // 7일
     return c.json({ ok: true })
   })
   app.get('/rl', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('rl-latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
