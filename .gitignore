@@ -14,3 +14,9 @@ tools/_*.mjs
 tools/blender/__pycache__/
 tools/pdf/intro.html
 tools/pdf/ai-doc.html
+
+# 시연 영상 원본 푸티지 (대용량·제출 후 불필요)
+docs/video/raw/
+
+# 제출 영상 산출물 (유튜브로 올라감 — 레포에 42MB 바이너리를 넣지 않는다)
+docs/video/OVERMIND-NAN2026*.mp4
