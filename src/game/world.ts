@@ -434,6 +434,37 @@ export class World {
     this.usePost = false
   }
 
+  /**
+   * 저사양 강등 2번 레버 — 그림자 프리패스 전면 차단.
+   * 2048² PCFSoft 섀도맵은 캐릭터 5종을 라이트 시점에서 한 번 더 그리는 것이라 블룸보다 비싸다.
+   * shadowMap.enabled만 끄면 three.js가 프리패스를 통째로 스킵하므로 개별 castShadow는 불필요.
+   * 단 three.js는 shadowMap.enabled 변화를 프로그램 재컴파일 조건으로 보지 않는다(WebGLRenderer의
+   * needsProgramChange 목록에 없음) — 재컴파일을 강제하지 않으면 셰이더에 USE_SHADOWMAP이 남아
+   * 갱신이 멈춘 섀도맵을 계속 샘플링해 "그림자가 그 자리에 얼어붙는" 잔상이 생긴다.
+   */
+  disableShadows(): void {
+    if (!this.renderer.shadowMap.enabled) return
+    this.renderer.shadowMap.enabled = false
+    this.scene.traverse((obj) => {
+      const light = obj as THREE.DirectionalLight
+      if (light.isDirectionalLight && light.castShadow) {
+        light.castShadow = false
+        light.shadow.map?.dispose() // 2048² 깊이 타깃 VRAM 회수
+        light.shadow.map = null
+      }
+      const mat = (obj as THREE.Mesh).material
+      if (mat) for (const m of Array.isArray(mat) ? mat : [mat]) m.needsUpdate = true
+    })
+  }
+
+  /** 검증용 게터 — 강등이 실제로 걸렸는지 __dbg().perf로 확인 (헤드리스/실기기 공통) */
+  get postEnabled(): boolean {
+    return this.usePost
+  }
+  get shadowsEnabled(): boolean {
+    return this.renderer.shadowMap.enabled
+  }
+
   render(): void {
     // ?norender — 헤드리스 로직 검증용 (소프트웨어 GL 렌더 병목 회피)
     if (this.noRender) return

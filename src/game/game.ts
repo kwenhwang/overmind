@@ -100,7 +100,8 @@ export class Game {
   /** 난이도별 점수 배율 — 쉬운 조작(자동 조준·사격)은 0.5배 + 리더보드도 분리 */
   private scoreMul = 1
   // 녹화 모드는 실시간 fps가 무의미 — 프로브 생략(블룸 유지)
-  private fpsProbe = { frames: 0, start: 0, done: new URLSearchParams(location.search).has('record') }
+  private readonly isRecording = new URLSearchParams(location.search).has('record')
+  private fpsProbe = { frames: 0, start: 0, done: this.isRecording }
   // ?norender — 헤드리스 검증용 렌더 스킵 (swiftshader 병목 제거, 로직만 구동)
   private noRender = new URLSearchParams(location.search).has('norender')
 
@@ -161,6 +162,12 @@ export class Game {
         design: this.pendingDesign
           ? { source: this.pendingDesign.source ?? 'unknown', bias: this.pendingDesign.spawnBias, reason: this.pendingDesign.counterReason, taunt: this.pendingDesign.taunt, hazards: this.pendingDesign.hazards?.map((h) => h.placement), spawns: this.pendingDesign.spawns.map((s) => `${s.type}x${s.count}${(s.modifiers ?? []).length ? '(' + s.modifiers!.join(',') + ')' : ''}`) }
           : null,
+        // 저사양 자동 강등 계측 — 프로브가 창을 열었는지·강등 레버가 내려갔는지
+        perf: {
+          probe: { ...this.fpsProbe, fps: this.fpsProbe.start ? Math.round((this.fpsProbe.frames / (performance.now() - this.fpsProbe.start)) * 1000) : null },
+          usePost: this.world.postEnabled,
+          shadowMap: this.world.shadowsEnabled,
+        },
         prefetchedWave: this.prefetchedWave,
         designLog: this.designLog, // 웨이브별 설계 출처 이력
         dodge: this.telemetry.debugDodge(),
@@ -241,6 +248,7 @@ export class Game {
     this.waveRequestController = null
     this.bossRequestController = null
     this.endRunLocked = false
+    this.fpsProbe = { frames: 0, start: 0, done: this.isRecording } // 재시작 = 측정 창 재개방(강등은 되돌리지 않음)
     this.designLog = []
     this.combatStarted = false
     this.pendingWaveClear = false
@@ -669,17 +677,6 @@ export class Game {
   }
 
   update(dt: number): void {
-    // 첫 3초(실시간) fps 실측 — 24fps 미만이면 블룸 오프 (저사양 심사 기기 대응)
-    if (!this.fpsProbe.done) {
-      if (this.fpsProbe.start === 0) this.fpsProbe.start = performance.now()
-      this.fpsProbe.frames++
-      const realSec = (performance.now() - this.fpsProbe.start) / 1000
-      if (realSec >= 3) {
-        this.fpsProbe.done = true
-        if (this.fpsProbe.frames / realSec < 24) this.world.disableBloom()
-      }
-    }
-
     if (this.state === 'title' || this.state === 'gameover' || this.state === 'victory') {
       if (!this.noRender) this.world.render()
       return
@@ -689,6 +686,28 @@ export class Game {
     const combatDt = dt * this.effects.timeScale(dt)
     const hpAtFrameStart = this.player.hp
     const combatFrame = this.state === 'playing' && this.bossDeathTimer < 0
+
+    // 실측 fps 3초 창 — 24fps 미만이면 저사양으로 판정하고 블룸·그림자를 동시에 내린다.
+    // 창은 "적이 실재하는 전투 프레임"에서만 연다: 타이틀·인터미션·보스 연출은 부하가 없어
+    // 거기서 3초를 재면 심사 기기의 실부하를 못 보고 창만 소진한다.
+    if (!this.fpsProbe.done) {
+      if (combatFrame && this.enemies.length > 0) {
+        if (this.fpsProbe.start === 0) this.fpsProbe.start = performance.now()
+        this.fpsProbe.frames++
+        const realSec = (performance.now() - this.fpsProbe.start) / 1000
+        if (realSec >= 3) {
+          this.fpsProbe.done = true
+          if (this.fpsProbe.frames / realSec < 24) {
+            this.world.disableBloom()
+            this.world.disableShadows()
+          }
+        }
+      } else if (this.fpsProbe.start !== 0) {
+        // 전투가 끊기면 창을 접는다 — 멈춘 시간이 분모에 들어가면 정상 기기가 저사양으로 오판된다
+        this.fpsProbe.start = 0
+        this.fpsProbe.frames = 0
+      }
+    }
 
     // 해저드 효과 (가시 피해·감속) — 이동 계산 전에 적용
     let speedMul = 1
