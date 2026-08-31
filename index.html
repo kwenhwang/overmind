@@ -75,6 +75,9 @@
     <label id="easy-label"><input type="checkbox" id="easy-toggle"> 쉬운 조작 (자동 조준·사격 · 점수 ½·랭킹 분리)</label>
     <button id="screen-btn" disabled>START</button>
   </div>
+  <!-- 방문·전환 계측(umami, 쿠키·개인정보 없음). 차단되거나 서버가 죽어도 게임은 그대로 돈다.
+       ⚠️ 이 태그는 정적으로 둘 것 — 운영 커버리지 점검이 라이브 HTML 원문을 grep해 계측 여부를 판정한다. -->
+  <script defer src="https://analytics.naru.build/script.js" data-website-id="943e429e-aec9-4638-b51a-ca96eb5277aa"></script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

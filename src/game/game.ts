@@ -20,6 +20,7 @@ import {
   memory, uploadDiag, uploadRL, submitScore, fetchLeaderboard,
 } from '../ai/director'
 import { Recorder } from './recorder'
+import { trackPlayStart, trackRunEnd } from '../analytics'
 import { pickThree } from './upgrades'
 import type {
   AnomalyEvaluation, BossDesign, BossPhase, PredictionContract, TelemetryDigest, WaveDesign,
@@ -192,6 +193,8 @@ export class Game {
           : [],
       })
       ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
+      // 완주(승리) 경로를 헤드리스로 재기 위한 훅 — 입력 없는 검증 봇은 보스 접촉으로 먼저 죽는다.
+      ;(window as unknown as Record<string, unknown>).__heal = () => { if (this.player) this.player.hp = this.player.stats.maxHp }
       ;(window as unknown as Record<string, unknown>).__bossDbg = () =>
         this.boss
           ? {
@@ -296,6 +299,7 @@ export class Game {
     this.combo = 0
     this.hud.setScore(0, 0)
     memory.startRun()
+    trackPlayStart({ mode: this.modeLabel(), version: GAME_VERSION })
     // ?boss — 보스전 직행 (검증·영상 촬영용 디버그)
     if (new URLSearchParams(location.search).has('boss')) {
       this.wave = TOTAL_WAVES
@@ -1164,6 +1168,11 @@ export class Game {
     }
   }
 
+  /** 계측·진단 공통 판 구분 라벨 */
+  private modeLabel(): string {
+    return this.easy ? 'easy' : IS_TOUCH ? 'mobile' : 'desktop'
+  }
+
   private endRun(victory: boolean): void {
     if (this.endRunLocked) return
     this.endRunLocked = true
@@ -1203,6 +1212,10 @@ export class Game {
       .map(([src, n]) => `${src} ${Math.round(n)}`)
       .join(' · ')
     const dmgLine = dmg ? `\n\n피해: ${dmg}` : ''
+    // 계측(umami): 시작 대비 완주율. 실패해도 판 종료 흐름을 막지 않는다.
+    trackRunEnd({
+      victory, wave: this.wave, score: this.score, mode: this.modeLabel(), version: GAME_VERSION,
+    })
     // 판 종료 시 요약 자동 전송 — 진단 버튼이 승리/게임오버 화면에 가려도 개발자가 실플레이 분석 가능
     void uploadDiag({
       img: '',
@@ -1212,7 +1225,7 @@ export class Game {
           wave: this.wave,
           score: this.score,
           hpLeft: Math.round(this.player.hp),
-          mode: this.easy ? 'easy' : IS_TOUCH ? 'mobile' : 'desktop',
+          mode: this.modeLabel(),
           damage: this.player.damageBySource,
           designLog: this.designLog, // 판 전체의 웨이브별 설계 출처 — LLM 가동률 사후 집계
           build: __BUILD__,
