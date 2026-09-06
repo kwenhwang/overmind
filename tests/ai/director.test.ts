@@ -172,7 +172,9 @@ describe('wave design guardrails through the public director API', () => {
     let requestCount = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        // /directive 앞에 세션 토큰 발급 호출이 끼므로 회차 판정에서 제외한다(2026-09-07)
+        if (String(url).endsWith('/session')) return { ok: true, json: async () => ({ token: 'tok' }) }
         requestCount += 1
         if (requestCount === 1) {
           return {
@@ -210,7 +212,9 @@ describe('wave design guardrails through the public director API', () => {
     let requestCount = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        // /directive 앞에 세션 토큰 발급 호출이 끼므로 회차 판정에서 제외한다(2026-09-07)
+        if (String(url).endsWith('/session')) return { ok: true, json: async () => ({ token: 'tok' }) }
         requestCount += 1
         if (requestCount === 1) {
           return {
