@@ -55,12 +55,28 @@ function addRim(mat: THREE.MeshStandardMaterial, hex: number): void {
 }
 
 /**
+ * 발광 피크 상한 — glb 저작 강도(보스 눈동자 16·홍채 5)가 ACES 톤매핑에서 전부 1.0 근처로
+ * 뭉개져 눈·장갑·궤도링의 형태 구분이 사라진다(제출 영상 36초의 '흰 덩어리'). 색조는 살리고
+ * 강도만 낮춘다 — 채널 피크(=emissive의 최대 성분 × intensity)가 이 값을 넘지 않게.
+ * 1.4 = ACES 후 약 0.86(선형) → 하이라이트로는 충분히 밝고 형태는 남는 지점.
+ */
+export const EMISSIVE_PEAK = 1.4
+
+/** 머티리얼의 발광 채널 피크를 EMISSIVE_PEAK 이하로 (색조 보존, 강도만 축소) */
+export function clampEmissive(mat: THREE.MeshStandardMaterial): void {
+  const peak = Math.max(mat.emissive.r, mat.emissive.g, mat.emissive.b)
+  if (peak <= 0) return
+  mat.emissiveIntensity = Math.min(mat.emissiveIntensity, EMISSIVE_PEAK / peak)
+}
+
+/**
  * 게임과 업로드 뷰어가 공유하는 머티리얼 처리 — 로드 시·미리보기 시 동일한 룩 보장.
  * (metalness/roughness 정규화 + 종류별 tint + 플레이어 플랫핑크 + 프레넬 림)
  */
 export function configureMaterial(mat: THREE.MeshStandardMaterial, name: ModelName): void {
   mat.metalness = Math.min(mat.metalness, 0.15)
   mat.roughness = Math.max(mat.roughness, 0.55)
+  clampEmissive(mat)
   const tint = ENEMY_TINT[name]
   if (tint) {
     const hsl = { h: 0, s: 0, l: 0 }
@@ -174,9 +190,25 @@ export function collectMats(group: THREE.Object3D): THREE.MeshStandardMaterial[]
   return mats
 }
 
-/** 피격 흰색 플래시 (60ms) */
+/** 진행 중인 플래시 — 머티리얼별 '원래 발광색'과 복구 타이머 */
+const flashing = new WeakMap<THREE.MeshStandardMaterial, { hex: number; timer: ReturnType<typeof setTimeout> }>()
+
+/**
+ * 피격 흰색 플래시 (60ms).
+ * 60ms 안에 두 번째 피격이 겹치면 예전 구현은 '이미 흰색'을 원본으로 기억해 흰색으로 복구했다
+ * → 유닛이 영구히 흰 덩어리로 고착(보스는 난타당하므로 사실상 항상 발생). 머티리얼별로
+ * 최초 원본만 보관하고 타이머를 새로 걸어, 겹쳐도 마지막 플래시 후 60ms에 원래 색으로 돌아온다.
+ */
 export function flashMats(mats: THREE.MeshStandardMaterial[]): void {
-  const originals = mats.map((m) => m.emissive.getHex())
-  for (const m of mats) m.emissive.setHex(0xffffff)
-  setTimeout(() => mats.forEach((m, i) => m.emissive.setHex(originals[i])), 60)
+  for (const m of mats) {
+    const prev = flashing.get(m)
+    if (prev) clearTimeout(prev.timer)
+    const hex = prev ? prev.hex : m.emissive.getHex()
+    m.emissive.setHex(0xffffff)
+    const timer = setTimeout(() => {
+      m.emissive.setHex(hex)
+      flashing.delete(m)
+    }, 60)
+    flashing.set(m, { hex, timer })
+  }
 }
