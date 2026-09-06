@@ -108,9 +108,18 @@ async function sendToServer(): Promise<void> {
   sendBtn.textContent = '전송 중…'
   sendBtn.classList.remove('err', 'sent')
   try {
+    // 업로드도 세션 토큰을 요구한다(2026-08-18) — 전송이 드물어 매번 새로 받는다.
+    // 실패 시 빈 문자열로 진행: 서버가 SESSION_SECRET 미설정이면 그대로 통과한다.
+    let token = ''
+    try {
+      const s = await fetch(`${PROXY}/session`, { signal: AbortSignal.timeout(4000) })
+      if (s.ok) token = ((await s.json()) as { token?: string }).token ?? ''
+    } catch {
+      /* 토큰 없이 시도 */
+    }
     const res = await fetch(`${PROXY}/model`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-session-token': token },
       body: JSON.stringify({ slot: slotSel.value, name: lastName, glb: abToBase64(lastBuffer) }),
     })
     const ok = res.ok && (await res.json()).ok

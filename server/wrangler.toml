@@ -4,6 +4,10 @@ compatibility_date = "2026-07-01"
 
 # 시크릿 (커밋 금지 — wrangler secret put으로 주입):
 #   OPENAI_API_KEY (기본 프로바이더) 또는 ANTHROPIC_API_KEY
+#   SESSION_SECRET — /directive + 업로드(POST /diag·/model·/rl) 세션 토큰 서명 키.
+#   DIAG_KEY       — 진단·에셋·RL **조회**(GET) 개발자 키.
+# ⚠️ 주입을 깜빡하면 게이트가 조용히 열린다(SESSION_SECRET 미설정 = 업로드 검증 생략).
+#    배포 후 반드시: curl .../health → gates가 {"diag":"on","session":"on"}인지 확인.
 # 일반 변수:
 [vars]
 MODEL = "gpt-4.1-nano"

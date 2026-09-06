@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { digestSchema, waveDesignSchema, bossDesignSchema } from './schema'
 import { callLlm, pickProvider } from './llm'
@@ -19,6 +19,12 @@ export interface Env {
   MAX_DAILY_CALLS?: string
   /** 세션 토큰 HMAC 서명 키. 미설정 시 토큰 검증 생략(하위호환) */
   SESSION_SECRET?: string
+  /**
+   * 진단·에셋·RL 데이터 **조회**용 개발자 키 (2026-08-04 보안 감사).
+   * 미설정이면 조회 라우트는 열리지 않고 503을 낸다 — 하위호환으로 열어두면
+   * 설정을 깜빡한 배포가 곧 유출이라, 여기서는 fail-closed가 맞다.
+   */
+  DIAG_KEY?: string
   /** 진단 캡처 저장 KV (게임 내 진단 버튼 업로드) */
   DIAG?: {
     put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
@@ -93,7 +99,9 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     })(c, next)
   })
 
-  // llm 필드: 외부 가동감시(Uptime Kuma)가 '"llm":"ok"' 키워드 부재로 경보하는 용도
+  // llm 필드: 외부 가동감시(Uptime Kuma)가 '"llm":"ok"' 키워드 부재로 경보하는 용도.
+  // gates 필드: 시크릿 주입을 깜빡한 배포가 게이트를 '조용히 무효화'하는 함정 대비 —
+  // 키 값은 절대 노출하지 않고 켜짐/꺼짐만 알린다. 감시는 '"session":"on"' 부재로 잡는다.
   app.get('/health', async (c) => {
     const env = getEnv(c)
     // KV 없는 런타임(node 예비)에선 판별 불가 — 'ok' 오보 대신 'unknown'
@@ -105,14 +113,57 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
         llm = 'unknown'
       }
     }
-    return c.json({ ok: true, llm })
+    return c.json({
+      ok: true,
+      llm,
+      gates: { diag: env.DIAG_KEY ? 'on' : 'off', session: env.SESSION_SECRET ? 'on' : 'off' },
+    })
   })
 
+  // ── 진단·에셋·RL KV (2026-08-04 보안 감사) ────────────────────────────────
+  // 비대칭 설계인 이유를 적어둔다:
+  //   업로드(POST)는 **브라우저**가 부른다(게임 내 '진단 전송' 버튼, 뷰어의 '서버로
+  //   전송'). 클라이언트에 넣은 시크릿은 시크릿이 아니므로 POST에 DIAG_KEY를 걸 수 없다 —
+  //   대신 per-IP 리미터 + 세션 토큰(requireSession, 2026-08-18)으로 문턱을 올린다.
+  //   조회(GET)는 **개발자만** curl로 부른다. 여기가 진짜 구멍이었다: /diag GET이
+  //   사용자 실기기 화면 캡처(dataURL)를 인증 없이 아무에게나 내주고 있었고,
+  //   워커 URL은 배포 번들에 하드코딩(src/ai/director.ts)돼 있어 누구나 안다.
+  //   그래서 GET만 DIAG_KEY로 잠근다.
+  const requireDiagKey = (c: Context) => {
+    const env = getEnv(c)
+    if (!env.DIAG_KEY) return c.json({ ok: false, reason: 'diag_key_unset' }, 503)
+    if (c.req.header('x-diag-key') !== env.DIAG_KEY) {
+      return c.json({ ok: false, reason: 'unauthorized' }, 401)
+    }
+    return null
+  }
+
+  // 업로드 도배 방지 — LLM 경로와 같은 per-IP 창을 쓴다(별도 예산이 아니라 남용 방지).
+  const uploadThrottled = (c: Context) =>
+    rateLimited(`upload:${c.req.header('cf-connecting-ip') ?? 'unknown'}`)
+
+  /**
+   * 업로드(POST) 문턱 — /directive와 같은 세션 토큰을 재사용한다 (2026-08-18).
+   * 키가 아니라 문턱인 이유: /session은 공개 발급이라 스크립트도 토큰을 받을 수 있다.
+   * 그래도 (a) 헤더 없는 무작정 POST를 막고 (b) 토큰 30분 TTL로 재사용을 끊고
+   * (c) 리미터와 곱해져 KV 오염 비용을 올린다. 진짜 비밀은 조회(GET)의 DIAG_KEY 쪽이다.
+   * SESSION_SECRET 미설정 시엔 검증을 생략한다 — 로컬(node.ts)·KV 없는 예비 런타임
+   * 호환. 라이브 설정 여부는 /health의 gates.session으로 밖에서 확인한다.
+   */
+  const requireSession = async (c: Context): Promise<Response | null> => {
+    const env = getEnv(c)
+    if (!env.SESSION_SECRET) return null
+    const ok = await verifyToken(env.SESSION_SECRET, c.req.header('x-session-token'))
+    return ok ? null : c.json({ ok: false, reason: 'no_token' }, 401)
+  }
+
   // 진단 캡처 업로드 — 게임 내 '진단 전송' 버튼이 화면(dataURL)+렌더 정보를 올림.
-  // 개발자가 사용자 실기기 화면을 직접 확인하기 위한 통로 (최신본 'latest' 고정키).
   app.post('/diag', async (c) => {
     const env = getEnv(c)
+    const denied = await requireSession(c)
+    if (denied) return denied
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text() // {img, info} JSON 문자열 (최대 ~수백KB)
     if (body.length > 20 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('latest', body, { expirationTtl: 86400 })
@@ -120,6 +171,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   })
 
   app.get('/diag', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
@@ -129,7 +182,10 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   // 개발자가 curl로 받아 public/models/에 통합. 최신본 'model-latest' 고정키.
   app.post('/model', async (c) => {
     const env = getEnv(c)
+    const denied = await requireSession(c)
+    if (denied) return denied
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text() // {slot, name, glb(base64)} JSON
     if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('model-latest', body, { expirationTtl: 86400 })
@@ -137,6 +193,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   })
 
   app.get('/model', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('model-latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
@@ -145,13 +203,18 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   // 게임플레이 로그(RL 데이터셋) 업로드/조회 — ?rl 모드 에피소드. KV 재사용.
   app.post('/rl', async (c) => {
     const env = getEnv(c)
+    const denied = await requireSession(c)
+    if (denied) return denied
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (uploadThrottled(c)) return c.json({ ok: false, reason: 'rate_limited' }, 429)
     const body = await c.req.text()
     if (body.length > 24 * 1024 * 1024) return c.json({ ok: false, reason: 'too_large' }, 413)
     await env.DIAG.put('rl-latest', body, { expirationTtl: 604800 }) // 7일
     return c.json({ ok: true })
   })
   app.get('/rl', async (c) => {
+    const denied = requireDiagKey(c)
+    if (denied) return denied
     const env = getEnv(c)
     const v = env.DIAG ? await env.DIAG.get('rl-latest') : null
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
