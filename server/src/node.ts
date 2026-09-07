@@ -11,6 +11,9 @@ const env: Env = {
   MODEL: process.env.MODEL,
   REASONING_EFFORT: process.env.REASONING_EFFORT,
   MAX_DAILY_CALLS: process.env.MAX_DAILY_CALLS,
+  // 게이트 시크릿도 넘긴다 — 여기 빠뜨리면 예비 런타임만 인증 없이 도는 구멍이 된다
+  SESSION_SECRET: process.env.SESSION_SECRET,
+  DIAG_KEY: process.env.DIAG_KEY,
 }
 
 const app = createApp(() => env)
