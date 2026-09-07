@@ -14,38 +14,70 @@ const ENDPOINTS: string[] = [
 // 웨이브 설계는 전투 중 프리페치(백그라운드)라 게임을 막지 않음 → 넉넉히.
 // gpt-5.4-mini의 한국어 보스급 응답이 ~16s 걸려 기존 6s는 항상 폴백이었음(치명적).
 const TIMEOUT_MS = 20000
-let sessionToken = ''
+// 서버 토큰 TTL은 30분(server/src/token.ts) — 한 판이 그보다 길면 시작 때 받은 토큰이
+// 죽는다. 25분에서 선제 재발급하고, 그래도 401이 나면 업로드 경로가 1회 재시도한다.
+const TOKEN_MAX_AGE_MS = 25 * 60 * 1000
+// 토큰은 **엔드포인트마다** 따로 캐시한다 — 서명 키(SESSION_SECRET)가 프록시마다 다르므로
+// 1번 프록시의 토큰을 2번 프록시에 보내면 무조건 401이고, 재발급을 항상 1번에서 시작하면
+// 백업 프록시로의 페일오버가 영영 못 뚫린다(codex 교차검증 지적 2026-09-07).
+const sessionTokens = new Map<string, { token: string; issuedAt: number }>()
+
+/** 해당 엔드포인트의 유효 토큰 보장 — 없거나 오래됐으면 재발급. 실패해도 빈 문자열(요청은 그대로 시도) */
+async function ensureToken(base: string): Promise<string> {
+  const cached = sessionTokens.get(base)
+  if (cached && Date.now() - cached.issuedAt < TOKEN_MAX_AGE_MS) return cached.token
+  try {
+    const res = await fetch(`${base}/session`, { signal: AbortSignal.timeout(4000) })
+    if (res.ok) {
+      const token = ((await res.json()) as { token?: string }).token ?? ''
+      if (token) {
+        sessionTokens.set(base, { token, issuedAt: Date.now() })
+        return token
+      }
+    }
+  } catch {
+    /* 토큰 없이 시도 — SESSION_SECRET 미설정 서버와의 하위호환 */
+  }
+  return cached?.token ?? ''
+}
 
 /** 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작) */
 export async function initSession(): Promise<void> {
   for (const base of ENDPOINTS) {
-    try {
-      const res = await fetch(`${base}/session`, { signal: AbortSignal.timeout(4000) })
-      if (!res.ok) continue
-      sessionToken = ((await res.json()) as { token?: string }).token ?? ''
-      if (sessionToken) return
-    } catch {
-      /* 다음 엔드포인트 */
+    if (await ensureToken(base)) return
+  }
+}
+
+/**
+ * 업로드 공통 경로 — 세션 토큰을 붙여 POST한다.
+ * 401(토큰 만료·부재)이면 토큰을 버리고 딱 1회 재발급 후 재시도한다: 서버가 업로드에도
+ * 토큰을 요구하게 됐으므로(2026-08-18), 긴 판 끝의 진단·RL이 조용히 유실되면 안 된다.
+ */
+async function postWithSession(path: string, payload: unknown, timeoutMs: number): Promise<boolean> {
+  const body = JSON.stringify(payload)
+  for (const base of ENDPOINTS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(`${base}${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-session-token': await ensureToken(base) },
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+        if (res.ok) return true
+        if (res.status !== 401) break // 413·429·5xx는 재발급으로 안 풀린다 → 다음 엔드포인트
+        sessionTokens.delete(base) // 이 프록시 토큰만 만료 처리 → 다음 시도에서 재발급
+      } catch {
+        break // 네트워크·타임아웃 → 다음 엔드포인트
+      }
     }
   }
+  return false
 }
 
 /** 진단 캡처 업로드 (게임 내 '진단 전송' 버튼) — 개발자가 사용자 실기기 화면 확인용 */
 export async function uploadDiag(payload: { img: string; info: unknown }): Promise<boolean> {
-  for (const base of ENDPOINTS) {
-    try {
-      const res = await fetch(`${base}/diag`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (res.ok) return true
-    } catch {
-      /* 다음 엔드포인트 */
-    }
-  }
-  return false
+  return postWithSession('/diag', payload, 10_000)
 }
 
 export interface ScoreEntry {
@@ -89,20 +121,7 @@ export async function fetchLeaderboard(version: string): Promise<ScoreEntry[]> {
 
 /** 게임플레이 로그(RL 데이터셋) 업로드 — ?rl 에피소드 종료 시 */
 export async function uploadRL(episode: object): Promise<boolean> {
-  for (const base of ENDPOINTS) {
-    try {
-      const res = await fetch(`${base}/rl`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(episode),
-        signal: AbortSignal.timeout(15_000),
-      })
-      if (res.ok) return true
-    } catch {
-      /* 다음 엔드포인트 */
-    }
-  }
-  return false
+  return postWithSession('/rl', episode, 15_000)
 }
 
 const PROFILE_KEY = 'overmind-profile'
@@ -137,6 +156,32 @@ export const memory = {
   },
 }
 
+/**
+ * /directive 호출 — 401이면 이 프록시 토큰만 버리고 딱 1회 재발급해 재시도한다.
+ * 업로드 경로엔 있던 401 복구가 정작 LLM 경로엔 없어서, 서명 키 교체·서버 재배포로 토큰이
+ * 무효화되면 캐시 수명(25분)이 다 될 때까지 디렉터가 통째로 규칙 폴백으로 죽었다
+ * (codex 교차검증 지적 2026-09-07).
+ */
+async function postDirective(
+  base: string,
+  body: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<Response> {
+  const send = async (): Promise<Response> =>
+    fetch(`${base}/directive`, {
+      method: 'POST',
+      // 만료 토큰을 그대로 보내면 401 → 매 웨이브 폴백이 된다. 업로드와 같은 갱신 경로를 쓴다.
+      headers: { 'content-type': 'application/json', 'x-session-token': await ensureToken(base) },
+      body,
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+    })
+  const res = await send()
+  if (res.status !== 401) return res
+  sessionTokens.delete(base)
+  return send()
+}
+
 async function fetchWaveDesign(
   digest: TelemetryDigest,
   signal: AbortSignal | undefined,
@@ -147,12 +192,7 @@ async function fetchWaveDesign(
   for (const base of ENDPOINTS) {
     if (signal?.aborted || !isCurrent()) return null
     try {
-      const res = await fetch(`${base}/directive`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
-        body,
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
-      })
+      const res = await postDirective(base, body, signal, TIMEOUT_MS)
       if (signal?.aborted || !isCurrent()) return null
       if (!res.ok) continue
       const data = (await res.json()) as WaveDesign & { fallback?: boolean }
@@ -187,12 +227,8 @@ export async function requestBossDesign(digest: TelemetryDigest, signal?: AbortS
   for (const base of ENDPOINTS) {
     if (signal?.aborted || mySeq !== bossSeq) return null
     try {
-      const res = await fetch(`${base}/directive`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-session-token': sessionToken },
-        body,
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
-      })
+      // 보스전은 판 후반(30분 TTL 이후)에 오기 쉬워 만료 토큰 위험이 가장 크다.
+      const res = await postDirective(base, body, signal, 20_000)
       if (signal?.aborted || mySeq !== bossSeq) return null
       if (!res.ok) continue
       const data = (await res.json()) as BossDesign & { fallback?: boolean }
