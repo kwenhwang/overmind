@@ -21,6 +21,13 @@ const TOKEN_MAX_AGE_MS = 25 * 60 * 1000
 // 1번 프록시의 토큰을 2번 프록시에 보내면 무조건 401이고, 재발급을 항상 1번에서 시작하면
 // 백업 프록시로의 페일오버가 영영 못 뚫린다(codex 교차검증 지적 2026-09-07).
 const sessionTokens = new Map<string, { token: string; issuedAt: number }>()
+/**
+ * 이 탭에서 **처음 받은** 토큰 — 점수 제출 시 '판 시작 시계'로 함께 보낸다(x-run-token).
+ * 인증 토큰은 25분마다 갱신되므로 그것만 보내면 긴 세션에서 판 도중 갱신이 일어나
+ * 방금 번 점수가 서버의 too_fast 상한에 걸린다(codex 교차검증 지적 2026-09-13).
+ * 서버는 더 이른 쪽만 시계로 채택하므로 이 헤더는 상한을 좁힐 뿐 넓히지 않는다.
+ */
+const firstTokens = new Map<string, string>()
 
 /** 해당 엔드포인트의 유효 토큰 보장 — 없거나 오래됐으면 재발급. 실패해도 빈 문자열(요청은 그대로 시도) */
 async function ensureToken(base: string): Promise<string> {
@@ -32,6 +39,7 @@ async function ensureToken(base: string): Promise<string> {
       const token = ((await res.json()) as { token?: string }).token ?? ''
       if (token) {
         sessionTokens.set(base, { token, issuedAt: Date.now() })
+        if (!firstTokens.has(base)) firstTokens.set(base, token)
         return token
       }
     }
@@ -87,20 +95,38 @@ export interface ScoreEntry {
   at: number
 }
 
-/** 점수 제출 → 순위 반환. version별로 리더보드 분리(밸런스 변경 시 점수 비교 공정성) */
+/**
+ * 점수 제출 → 순위 반환. version별로 리더보드 분리(밸런스 변경 시 점수 비교 공정성).
+ * 업로드 경로와 같은 세션 토큰을 붙인다 (2026-09-13) — 서버가 /score에도 토큰을 요구하게
+ * 됐기 때문이다(무인증 시절엔 curl로 위조 점수를 넣을 수 있었다). 401이면 토큰을 버리고
+ * 딱 1회 재발급 후 재시도한다: 30분을 넘긴 긴 판의 제출이 조용히 유실되면 안 된다.
+ *
+ * 서버는 점수 상한을 '토큰 발급 이후 벌 수 있었을 최대치'로 재므로(too_fast), 인증 토큰과
+ * 별개로 이 탭이 처음 받은 토큰을 x-run-token에 실어 판 시작 시계를 알려준다.
+ */
 export async function submitScore(name: string, score: number, wave: number, version: string): Promise<number | null> {
+  const body = JSON.stringify({ name, score, wave, version })
   for (const base of ENDPOINTS) {
-    try {
-      const res = await fetch(`${base}/score`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, score, wave, version }),
-        signal: AbortSignal.timeout(6000),
-      })
-      if (!res.ok) continue
-      return ((await res.json()) as { rank?: number }).rank ?? null
-    } catch {
-      /* 다음 */
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const token = await ensureToken(base)
+        const res = await fetch(`${base}/score`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-session-token': token,
+            // 판 시작 시계 — 갱신 전 최초 토큰(만료됐어도 서명은 유효하다)
+            'x-run-token': firstTokens.get(base) ?? token,
+          },
+          body,
+          signal: AbortSignal.timeout(6000),
+        })
+        if (res.ok) return ((await res.json()) as { rank?: number }).rank ?? null
+        if (res.status !== 401) break // 400·429·5xx는 재발급으로 안 풀린다 → 다음 엔드포인트
+        sessionTokens.delete(base)
+      } catch {
+        break // 네트워크·타임아웃 → 다음 엔드포인트
+      }
     }
   }
   return null

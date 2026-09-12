@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { digestSchema, waveDesignSchema, bossDesignSchema } from './schema'
 import { callLlm, pickProvider } from './llm'
-import { issueToken, verifyToken } from './token'
+import { issueToken, tokenIssuedAt, verifyToken, verifyTokenSignature } from './token'
 
 export interface Env {
   /** 우선 사용 (gpt-5.4-mini 기본) */
@@ -95,7 +95,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return cors({
       origin: origins && origins.length > 0 ? origins : '*',
       allowMethods: ['POST', 'GET', 'OPTIONS'],
-      allowHeaders: ['content-type', 'x-session-token'],
+      allowHeaders: ['content-type', 'x-session-token', 'x-run-token'],
     })(c, next)
   })
 
@@ -220,20 +220,81 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return v ? c.body(v, 200, { 'content-type': 'application/json' }) : c.json({ ok: false })
   })
 
+  /**
+   * 점수 상한 2층 — 위조 점수가 공개 리더보드 최상단을 점거하는 것을 막는다.
+   *
+   * 1) 웨이브별 상한(SCORE_PER_WAVE_CAP): 클라가 보낸 wave 기준이라 **위조 가능한 값**이다.
+   *    그래서 이건 천장일 뿐 근거가 아니다.
+   * 2) 토큰 경과시간 상한(SCORE_PER_SEC_CAP): 근거는 /session이 서명해 준 발급 시각이다 —
+   *    SECRET을 모르면 못 고친다. "그 시각 이후 지금까지 사람이 실제로 벌 수 있었을 최대치"를
+   *    넘는 점수는 거절한다. 즉 위조하려면 진짜 플레이와 **같은 벽시계 시간**을 들여야 한다
+   *    (codex 교차검증 지적 2026-09-13: wave만 보면 토큰 하나로 1,100,000점 즉시 주입 가능).
+   *
+   * 수치 근거(2026-09-13 라이브 리더보드 실측): 최고 기록 v9 웨이브9 166,850점.
+   * 웨이브당 ~18.5k(→ 상한 100k, 5배 여유), 한 판을 10분으로 잡아 ~278점/초
+   * (→ 상한 1,500점/초, 5배 여유). 짧은 판의 오차는 SCORE_FREE_ALLOWANCE로 흡수한다.
+   */
+  const SCORE_PER_WAVE_CAP = 100_000
+  const SCORE_PER_SEC_CAP = 1_500
+  const SCORE_FREE_ALLOWANCE = 2_000
+  /** 판 시작 시계로 인정할 토큰의 최대 나이 — 한 세션(브라우저 탭)의 수명을 넘는 것은 안 본다 */
+  const SCORE_CLOCK_MAX_AGE_MS = 6 * 60 * 60 * 1000
+
   // 전역 리더보드 — 점수 제출/조회 (KV 'leaderboard', 상위 50 유지)
+  //
+  // 제출(POST)은 업로드 라우트(/diag·/model·/rl)와 같은 문턱을 쓴다 (2026-09-13, T-2026W37-244).
+  // 그 전에는 인증도 리미터도 없어 `curl -XPOST .../score '{"score":9999999}'`가 그대로
+  // 공개 리더보드에 들어갔다. 세션 토큰은 /session이 공개 발급이라 '키'는 아니지만,
+  // (a) 헤더 없는 무작정 POST를 끊고 (b) per-IP 리미터와 (c) 웨이브별 점수 상한과 곱해져
+  // 위조 비용을 올린다. 게임 클라이언트는 이미 같은 토큰을 들고 다닌다(src/ai/director.ts).
   app.post('/score', async (c) => {
     const env = getEnv(c)
+    const denied = await requireSession(c)
+    if (denied) return denied
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
+    if (rateLimited(`score:${c.req.header('cf-connecting-ip') ?? 'unknown'}`)) {
+      return c.json({ ok: false, reason: 'rate_limited' }, 429)
+    }
     const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number; version?: string } | null
-    if (!body || typeof body.score !== 'number' || body.score < 0 || body.score > 1e7) {
+    if (!body || typeof body.score !== 'number' || !Number.isFinite(body.score) || body.score < 0) {
       return c.json({ ok: false, reason: 'bad_score' }, 400)
+    }
+    // 웨이브는 점수 상한의 근거가 되므로 먼저 정규화한다 — 상한만 크게 부르려는 wave 위조 차단
+    const wave = Math.max(0, Math.min(11, Math.floor(Number(body.wave) || 0)))
+    if (body.score > SCORE_PER_WAVE_CAP * Math.max(1, wave)) {
+      return c.json({ ok: false, reason: 'implausible_score' }, 400)
+    }
+    // 서명된 발급 시각 대비 '벌 수 있었을 최대치' — 갓 받은 토큰으로는 큰 점수를 못 넣는다.
+    // (인증 토큰의 서명은 위 requireSession이 이미 검증했다. SESSION_SECRET 미설정 런타임은 종전대로.)
+    //
+    // 시계는 클라가 **지금 들고 있는 가장 오래된 토큰**(x-run-token)으로 잡는다. 인증 토큰은
+    // TTL 30분마다 갱신되므로, 그것만 보면 긴 세션에서 판 도중 갱신이 일어나 정상 점수가
+    // too_fast로 거절된다(codex 교차검증 지적 2026-09-13 — /directive 프리페치가 토큰을 갱신한다).
+    // 판 시작 시계는 인증이 아니라 '우리가 그때 발급했다'는 사실만 필요하므로 만료를 보지 않고
+    // 서명만 검증한다. 더 이른 쪽만 채택하므로 이 헤더로 상한을 **좁힐 수는 있어도 못 넓힌다**.
+    let clockAt = env.SESSION_SECRET ? tokenIssuedAt(c.req.header('x-session-token')) : null
+    if (clockAt !== null) {
+      const runTok = c.req.header('x-run-token')
+      const runAt = tokenIssuedAt(runTok)
+      if (
+        runAt !== null &&
+        runAt < clockAt &&
+        Date.now() - runAt < SCORE_CLOCK_MAX_AGE_MS &&
+        (await verifyTokenSignature(env.SESSION_SECRET!, runTok))
+      ) {
+        clockAt = runAt
+      }
+      const elapsedSec = Math.max(0, (Date.now() - clockAt) / 1000)
+      if (body.score > SCORE_FREE_ALLOWANCE + SCORE_PER_SEC_CAP * elapsedSec) {
+        return c.json({ ok: false, reason: 'too_fast' }, 400)
+      }
     }
     // 밸런스 버전별 리더보드 분리 — 난이도가 바뀌면 점수 비교가 불공정하므로 키를 버전으로 나눔
     const version = (String(body.version ?? 'v0').replace(/[^a-z0-9._-]/gi, '').slice(0, 16)) || 'v0'
     const entry = {
       name: String(body.name ?? '익명').slice(0, 12).replace(/[<>&]/g, ''),
       score: Math.floor(body.score),
-      wave: Math.max(0, Math.min(11, Math.floor(body.wave ?? 0))),
+      wave,
       at: Date.now(),
     }
     const key = `leaderboard:${version}`
