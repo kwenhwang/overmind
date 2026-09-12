@@ -138,9 +138,16 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     return null
   }
 
+  /**
+   * 호출자 IP — CF 워커는 cf-connecting-ip, 그 밖(node 예비 런타임·프록시 뒤)은 XFF.
+   * cf-connecting-ip만 읽으면 헤더가 없는 런타임에서 **모든 사용자가 한 버킷**('unknown')에
+   * 묶여 남의 제출이 내 429가 된다(codex 교차검증 지적 2026-09-13). /directive와 같은 해석을 쓴다.
+   */
+  const clientIp = (c: Context) =>
+    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+
   // 업로드 도배 방지 — LLM 경로와 같은 per-IP 창을 쓴다(별도 예산이 아니라 남용 방지).
-  const uploadThrottled = (c: Context) =>
-    rateLimited(`upload:${c.req.header('cf-connecting-ip') ?? 'unknown'}`)
+  const uploadThrottled = (c: Context) => rateLimited(`upload:${clientIp(c)}`)
 
   /**
    * 업로드(POST) 문턱 — /directive와 같은 세션 토큰을 재사용한다 (2026-08-18).
@@ -252,7 +259,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     const denied = await requireSession(c)
     if (denied) return denied
     if (!env.DIAG) return c.json({ ok: false, reason: 'no_kv' })
-    if (rateLimited(`score:${c.req.header('cf-connecting-ip') ?? 'unknown'}`)) {
+    if (rateLimited(`score:${clientIp(c)}`)) {
       return c.json({ ok: false, reason: 'rate_limited' }, 429)
     }
     const body = (await c.req.json().catch(() => null)) as { name?: string; score?: number; wave?: number; version?: string } | null

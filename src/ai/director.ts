@@ -53,11 +53,14 @@ async function ensureToken(base: string): Promise<string> {
   return cached?.token ?? ''
 }
 
-/** 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작) */
+/**
+ * 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작).
+ * **모든** 엔드포인트를 미리 데운다: 첫 프록시가 죽어 백업으로 넘어갈 때 토큰을 제출 직전에
+ * 받으면 판 시작 시계(x-run-token)가 0초가 되어 정상 점수가 too_fast로 거절된다
+ * (codex 교차검증 지적 2026-09-13).
+ */
 export async function initSession(): Promise<void> {
-  for (const base of ENDPOINTS) {
-    if (await ensureToken(base)) return
-  }
+  await Promise.all(ENDPOINTS.map((base) => ensureToken(base).catch(() => '')))
 }
 
 /**

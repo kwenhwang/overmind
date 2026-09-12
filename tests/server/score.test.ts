@@ -230,6 +230,21 @@ describe('판 시작 시계(x-run-token) — 긴 세션에서 토큰이 갱신�
 })
 
 describe('제출 도배 — per-IP 리미터', () => {
+  it('cf-connecting-ip가 없는 런타임에서는 XFF로 사용자를 가른다 (남의 제출이 내 429가 되지 않게)', async () => {
+    const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
+    const token = await issueToken(SECRET)
+    const mine = `10.9.9.${++ipSeq}`
+    const post = (xff: string) =>
+      new Request('http://x/score', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': `${xff}, 10.0.0.1`, 'x-session-token': token },
+        body: JSON.stringify({ score: 100, wave: 1, version: 'v11' }),
+      })
+    for (let i = 0; i < 11; i++) await app.request(post(mine)) // 남이 창을 다 쓴다
+    const others = await app.request(post(`10.9.8.${++ipSeq}`))
+    expect(others.status).toBe(200) // 다른 사용자는 멀쩡해야 한다
+  })
+
   it('같은 IP로 10회를 넘기면 429', async () => {
     const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
     const token = await issueToken(SECRET)
