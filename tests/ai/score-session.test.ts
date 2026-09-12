@@ -60,6 +60,35 @@ describe('점수 제출 세션 토큰', () => {
     expect(tokenOf(posts[1]!)).toBe('tok-2')
   })
 
+  it('제출에 성공하면 다음 판을 위해 시계를 새로 받는다 — 이전 판 시간 물림 방지', async () => {
+    let issued = 0
+    const calls = mockFetch((url) =>
+      url.endsWith('/session') ? json({ token: `tok-${++issued}` }) : json({ ok: true, rank: 1 }),
+    )
+    const { submitScore } = await import('../../src/ai/director')
+
+    await submitScore('플레이어', 1000, 2, 'v11')
+    await new Promise((r) => setTimeout(r, 0)) // 제출 뒤 비동기 재발급이 끝나길 기다린다
+    expect(calls.filter((c) => c.url.endsWith('/session')).length).toBe(2)
+
+    await submitScore('플레이어', 2000, 3, 'v11')
+    const posts = calls.filter((c) => c.url === `${PROXY}/score`)
+    const runTokenOf = (call: Call) =>
+      (call.init?.headers as Record<string, string> | undefined)?.['x-run-token']
+    expect(runTokenOf(posts[0]!)).toBe('tok-1')
+    expect(runTokenOf(posts[1]!)).toBe('tok-2') // 두 번째 판은 새 시계로 센다
+  })
+
+  it('제출에 판 시작 토큰(x-run-token)을 함께 싣는다', async () => {
+    const calls = mockFetch((url) =>
+      url.endsWith('/session') ? json({ token: 'tok-1' }) : json({ ok: true, rank: 2 }),
+    )
+    const { submitScore } = await import('../../src/ai/director')
+    await submitScore('플레이어', 500, 1, 'v11')
+    const post = calls.find((c) => c.url === `${PROXY}/score`)!
+    expect((post.init?.headers as Record<string, string>)['x-run-token']).toBe('tok-1')
+  })
+
   it('400(위조 점수 등)은 재발급으로 안 풀리므로 재시도하지 않는다', async () => {
     const calls = mockFetch((url) =>
       url.endsWith('/session') ? json({ token: 'tok-1' }) : json({ ok: false, reason: 'implausible_score' }, 400),
