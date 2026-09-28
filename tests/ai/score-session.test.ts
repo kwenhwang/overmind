@@ -99,3 +99,56 @@ describe('점수 제출 세션 토큰', () => {
     expect(calls.filter((c) => c.url === `${PROXY}/score`).length).toBe(1)
   })
 })
+
+/**
+ * 자동화 세션은 공개 리더보드에 제출하지 않는다 (T-2026W38-396).
+ * 실사고: 야간 UX 감사 렌즈가 헤드리스로 라이브를 플레이하고 `test-ux-revi` 1점을
+ * v11 공개 보드에 남겨 6일을 버텼다. 감사는 계속 돌되 제출만 끊는 자리가 여기다.
+ */
+describe('자동화 세션 제출 차단', () => {
+  const stubSession = (nav: Record<string, unknown>, search = '') => {
+    vi.stubGlobal('navigator', nav)
+    vi.stubGlobal('location', { search })
+  }
+
+  it('playwright(navigator.webdriver)로 돈 판은 제출하지 않는다 — 네트워크 호출 0', async () => {
+    const calls = mockFetch(() => json({ ok: true, rank: 1 }))
+    stubSession({ webdriver: true, userAgent: 'Mozilla/5.0 Chrome/140' })
+    const { submitScore } = await import('../../src/ai/director')
+
+    expect(await submitScore('test-ux-revi', 1, 1, 'v11')).toBeNull()
+    expect(calls.filter((c) => c.url === `${PROXY}/score`)).toEqual([])
+  })
+
+  it('헤드리스 UA도 막는다', async () => {
+    const calls = mockFetch(() => json({ ok: true, rank: 1 }))
+    stubSession({ userAgent: 'Mozilla/5.0 HeadlessChrome/140.0.0.0 Safari/537.36' })
+    const { submitScore } = await import('../../src/ai/director')
+
+    expect(await submitScore('qa-probe-p0', 9_999_999, 11, 'v9')).toBeNull()
+    expect(calls.filter((c) => c.url === `${PROXY}/score`)).toEqual([])
+  })
+
+  it('하네스 플래그(?autostart&record&norender)가 붙은 판도 막는다', async () => {
+    const calls = mockFetch(() => json({ ok: true, rank: 1 }))
+    stubSession({ userAgent: 'Mozilla/5.0 Chrome/140' }, '?autostart&record&norender')
+    const { submitScore } = await import('../../src/ai/director')
+
+    expect(await submitScore('플레이어', 1000, 3, 'v11')).toBeNull()
+    expect(calls.filter((c) => c.url === `${PROXY}/score`)).toEqual([])
+  })
+
+  it('사람이 브라우저에서 친 판은 그대로 제출된다 — 게이트가 심사자 점수를 자르면 안 된다', async () => {
+    const calls = mockFetch((url) =>
+      url.endsWith('/session') ? json({ token: 'tok-1' }) : json({ ok: true, rank: 2 }),
+    )
+    stubSession(
+      { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36' },
+      '?utm_source=nan2026',
+    )
+    const { submitScore } = await import('../../src/ai/director')
+
+    expect(await submitScore('황도윤', 166_850, 9, 'v9')).toBe(2)
+    expect(calls.filter((c) => c.url === `${PROXY}/score`)).toHaveLength(1)
+  })
+})

@@ -111,7 +111,31 @@ export interface ScoreEntry {
  * 서버는 점수 상한을 '토큰 발급 이후 벌 수 있었을 최대치'로 재므로(too_fast), 인증 토큰과
  * 별개로 이 탭이 처음 받은 토큰을 x-run-token에 실어 판 시작 시계를 알려준다.
  */
+/**
+ * 자동화 세션(헤드리스 QA·야간 감사 렌즈·녹화/벤치 도구) 감지 — 점수 제출만 끊는다.
+ *
+ * 계기(T-2026W38-396, 2026-09-19): 우리 UX 감사 렌즈가 라이브를 헤드리스로 플레이하고
+ * `test-ux-revi` 1점을 v11 공개 보드에 남겨 6일을 버텼다. 감사는 계속 돌아야 하고 플레이도
+ * 그대로 검증돼야 하므로, 게임을 막지 않고 **제출 한 곳만** 막는다.
+ * 서버 겹(예약 이름 400 + 자가청소)은 server/src/app.ts에 따로 있다 — curl 직격은 그쪽이 맡는다.
+ */
+export function isAutomatedSession(): boolean {
+  try {
+    const nav = (globalThis as { navigator?: Navigator & { webdriver?: boolean } }).navigator
+    if (nav?.webdriver) return true
+    if (/headless|playwright|puppeteer|phantom|selenium|lighthouse|crawler|bot\b/i.test(nav?.userAgent ?? '')) return true
+    const search = (globalThis as { location?: { search?: string } }).location?.search
+    if (!search) return false
+    const q = new URLSearchParams(search)
+    // 우리 헤드리스 하네스 플래그 + 판을 왜곡하는 개발 치트(배속·자동조준)
+    return ['record', 'norender', 'rl', 'probe', 'bench', 'autostart', 'timescale', 'autoaim'].some((k) => q.has(k))
+  } catch {
+    return false // 감지에 실패하면 막지 않는다 — 사람의 점수를 잃는 쪽이 더 나쁘다
+  }
+}
+
 export async function submitScore(name: string, score: number, wave: number, version: string): Promise<number | null> {
+  if (isAutomatedSession()) return null // 자동화 판은 공개 보드에 안 올린다 (T-2026W38-396)
   const body = JSON.stringify({ name, score, wave, version })
   for (const base of ENDPOINTS) {
     for (let attempt = 0; attempt < 2; attempt++) {

@@ -241,11 +241,47 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
    * 웨이브당 ~18.5k(→ 상한 100k, 5배 여유), 한 판을 10분으로 잡아 ~278점/초
    * (→ 상한 1,500점/초, 5배 여유). 짧은 판의 오차는 SCORE_FREE_ALLOWANCE로 흡수한다.
    */
+  /**
+   * 자동화(우리 감사 렌즈·QA 프로브)의 라이브 리더보드 오염 차단 + 자가청소 (T-2026W38-396, 2026-09-19).
+   *
+   * 계기 — 공개 보드가 두 번 오염됐다. 둘 다 외부 공격이 아니라 **우리 야간 감사 렌즈**였다:
+   *   · v9 1위 `qa-probe-p0` 9,999,999점(웨이브11, 2026-09-18) — 보안 렌즈가 위조 점수 경로를 라이브에서 시험.
+   *   · v11 `test-ux-revi` 1점(웨이브1, 2026-09-12) — UX 렌즈가 헤드리스로 판을 끝내고 이름을 남겨 6일 잔류.
+   * 빗장은 두 겹이고 여기가 서버 겹이다(클라 겹 = `isAutomatedSession()` · src/ai/director.ts):
+   *   (a) 예약 이름(프로브·테스트 티가 나는 이름)은 공개 버전 보드에 못 들어간다 — 모래상자 버전으로 가라.
+   *   (b) **이미 KV에 앉은 오염은 읽기에서 안 보이고, 다음 제출 때 격리 키로 옮겨진다.**
+   *       배포만 하면 저절로 청소되는 쪽을 골랐다 — 수동 KV 수술은 자격(CF 토큰)이 있는 사람만 할 수 있고,
+   *       그 대기 때문에 v11 오염이 6일을 살아남았다. 다만 **지우지는 않는다**: 격리 키에 옮겨 적고 나서만 뺀다.
+   */
+  const RESERVED_NAME =
+    /(qa[-_ ]?probe|probe|테스트|test|bot|audit|e2e|smoke|crawler|headless|playwright|puppeteer|selenium|lighthouse)/i
+  /** 자동화가 점수를 넣어도 되는 유일한 버전 키 — 공개 보드가 아니라 모래상자다 */
+  const SANDBOX_VERSION = 'sandbox'
+  /** 격리 보관 상한 — 증거는 남기되 KV 값이 무한히 자라지 않게 */
+  const QUARANTINE_MAX = 50
+
   const SCORE_PER_WAVE_CAP = 100_000
   const SCORE_PER_SEC_CAP = 1_500
   const SCORE_FREE_ALLOWANCE = 2_000
   /** 판 시작 시계로 인정할 토큰의 최대 나이 — 한 세션(브라우저 탭)의 수명을 넘는 것은 안 본다 */
   const SCORE_CLOCK_MAX_AGE_MS = 6 * 60 * 60 * 1000
+
+  type BoardEntry = { name: string; score: number; wave: number; at: number }
+
+  /** 공개 보드에 있으면 안 되는 항목 — 위조 점수(현행 상한 초과)이거나 자동화 이름 */
+  const isPolluted = (e: BoardEntry): boolean =>
+    !Number.isFinite(e?.score) ||
+    e.score > SCORE_PER_WAVE_CAP * Math.max(1, Math.floor(Number(e?.wave) || 0)) ||
+    RESERVED_NAME.test(String(e?.name ?? ''))
+
+  /** 저장된 보드를 깨끗한 것/오염된 것으로 가른다 (모래상자 버전은 원본 그대로 둔다) */
+  const partitionBoard = (board: BoardEntry[], version: string) => {
+    if (version === SANDBOX_VERSION) return { clean: board, dirty: [] as BoardEntry[] }
+    const clean: BoardEntry[] = []
+    const dirty: BoardEntry[] = []
+    for (const e of board) (isPolluted(e) ? dirty : clean).push(e)
+    return { clean, dirty }
+  }
 
   // 전역 리더보드 — 점수 제출/조회 (KV 'leaderboard', 상위 50 유지)
   //
@@ -304,11 +340,35 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
       wave,
       at: Date.now(),
     }
+    // 자동화 제출 차단 — 프로브가 공개 보드에 이름을 남기지 못하게 한다.
+    // 막기만 하면 렌즈가 갈 곳이 없어 또 라이브를 때리므로, 갈 곳(모래상자)을 사유에 적어 돌려준다.
+    if (version !== SANDBOX_VERSION && RESERVED_NAME.test(entry.name)) {
+      return c.json(
+        { ok: false, reason: 'reserved_name', hint: `automation must submit with version="${SANDBOX_VERSION}"` },
+        400,
+      )
+    }
     const key = `leaderboard:${version}`
     try {
       const raw = await env.DIAG.get(key)
-      const board = raw ? (JSON.parse(raw) as (typeof entry)[]) : []
-      board.push(entry)
+      const stored = raw ? (JSON.parse(raw) as BoardEntry[]) : []
+      const { clean, dirty } = partitionBoard(stored, version)
+      let board = clean
+      if (dirty.length > 0) {
+        // 지우기 전에 옮겨 적는다 — 격리 기록에 실패하면 청소를 포기하고 오염을 그대로 둔다.
+        // (증거 없는 삭제보다 눈에 보이는 오염이 낫다. 읽기 경로는 어차피 걸러 보여준다.)
+        try {
+          const qKey = `${key}:quarantine`
+          const prevRaw = await env.DIAG.get(qKey)
+          const prev = prevRaw ? (JSON.parse(prevRaw) as BoardEntry[]) : []
+          await env.DIAG.put(qKey, JSON.stringify([...dirty, ...prev].slice(0, QUARANTINE_MAX)))
+          console.error('leaderboard_quarantined', key, dirty.length)
+        } catch (qErr) {
+          console.error('leaderboard_quarantine_failed', qErr)
+          board = stored
+        }
+      }
+      board = [...board, entry]
       board.sort((a, b) => b.score - a.score)
       const top = board.slice(0, 50)
       await env.DIAG.put(key, JSON.stringify(top))
@@ -323,7 +383,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
     const env = getEnv(c)
     const version = (String(c.req.query('v') ?? 'v0').replace(/[^a-z0-9._-]/gi, '').slice(0, 16)) || 'v0'
     const raw = env.DIAG ? await env.DIAG.get(`leaderboard:${version}`) : null
-    return c.json(raw ? JSON.parse(raw) : [])
+    // 읽기에서도 거른다 — 배포 즉시 공개 보드가 깨끗해진다(KV 정리는 다음 제출 때 따라온다).
+    return c.json(raw ? partitionBoard(JSON.parse(raw) as BoardEntry[], version).clean : [])
   })
 
   // 게임 시작 시 1회 — 단기 서명 토큰 발급 (봇 진입 장벽)
