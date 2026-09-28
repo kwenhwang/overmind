@@ -60,15 +60,22 @@ describe('점수 제출 세션 토큰', () => {
     expect(tokenOf(posts[1]!)).toBe('tok-2')
   })
 
-  it('제출에 성공하면 다음 판을 위해 시계를 새로 받는다 — 이전 판 시간 물림 방지', async () => {
+  it('다음 판의 시계는 제출 시점이 아니라 실제 판 시작(memory.startRun)에서 연다 — 판간 시간 물림 방지', async () => {
     let issued = 0
     const calls = mockFetch((url) =>
       url.endsWith('/session') ? json({ token: `tok-${++issued}` }) : json({ ok: true, rank: 1 }),
     )
-    const { submitScore } = await import('../../src/ai/director')
+    const { submitScore, memory } = await import('../../src/ai/director')
 
     await submitScore('플레이어', 1000, 2, 'v11')
-    await new Promise((r) => setTimeout(r, 0)) // 제출 뒤 비동기 재발급이 끝나길 기다린다
+    await new Promise((r) => setTimeout(r, 0))
+    // 제출 직후엔 시계를 새로 받지 않는다 — 종료 화면에서 기다린 시간이 다음 판에 인정되면 안 된다
+    expect(calls.filter((c) => c.url.endsWith('/session')).length).toBe(1)
+
+    const ls = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v) })
+    memory.startRun() // 다음 판 시작 — 여기서 새 시계를 받는다
+    await new Promise((r) => setTimeout(r, 0))
     expect(calls.filter((c) => c.url.endsWith('/session')).length).toBe(2)
 
     await submitScore('플레이어', 2000, 3, 'v11')
@@ -76,7 +83,21 @@ describe('점수 제출 세션 토큰', () => {
     const runTokenOf = (call: Call) =>
       (call.init?.headers as Record<string, string> | undefined)?.['x-run-token']
     expect(runTokenOf(posts[0]!)).toBe('tok-1')
-    expect(runTokenOf(posts[1]!)).toBe('tok-2') // 두 번째 판은 새 시계로 센다
+    expect(runTokenOf(posts[1]!)).toBe('tok-2') // 두 번째 판은 판 시작에 받은 새 시계로 센다
+  })
+
+  it('판 시작 없이 온 다음 제출은 이전 판 토큰을 시계로 쓰지 않는다', async () => {
+    let issued = 0
+    const calls = mockFetch((url) =>
+      url.endsWith('/session') ? json({ token: `tok-${++issued}` }) : json({ ok: true, rank: 1 }),
+    )
+    const { submitScore } = await import('../../src/ai/director')
+    await submitScore('플레이어', 1000, 2, 'v11')
+    await submitScore('플레이어', 2000, 3, 'v11')
+    const posts = calls.filter((c) => c.url === `${PROXY}/score`)
+    const runTokenOf = (call: Call) =>
+      (call.init?.headers as Record<string, string> | undefined)?.['x-run-token']
+    expect(runTokenOf(posts[1]!)).not.toBe('tok-1')
   })
 
   it('제출에 판 시작 토큰(x-run-token)을 함께 싣는다', async () => {

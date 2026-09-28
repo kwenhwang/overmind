@@ -59,6 +59,19 @@ async function ensureToken(base: string): Promise<string> {
  * 받으면 판 시작 시계(x-run-token)가 0초가 되어 정상 점수가 too_fast로 거절된다
  * (codex 교차검증 지적 2026-09-13).
  */
+/**
+ * 판 시작 시계를 **지금** 연다 — 모든 엔드포인트의 토큰을 새로 받아 판 시작 토큰으로 삼는다.
+ * memory.startRun()이 매 판 시작에 부른다. 모든 엔드포인트를 데우는 이유는 initSession과 같다
+ * (백업으로 넘어간 뒤 제출 직전에 받으면 시계가 0초라 정상 점수가 too_fast로 거절된다).
+ */
+export async function beginRunClock(): Promise<void> {
+  for (const b of ENDPOINTS) {
+    runTokens.delete(b)
+    sessionTokens.delete(b)
+  }
+  await initSession()
+}
+
 export async function initSession(): Promise<void> {
   await Promise.all(ENDPOINTS.map((base) => ensureToken(base).catch(() => '')))
 }
@@ -156,13 +169,15 @@ export async function submitScore(name: string, score: number, wave: number, ver
           // 판 종료 — 다음 판의 시계는 여기서 다시 시작한다(이전 판 시간 물림 방지).
           // 캐시된 토큰을 그대로 두면 그 토큰의 발급 시각(최대 25분 전)을 물려받으므로
           // 인증 토큰까지 버리고 새로 받는다 — 다음 판은 '지금'부터 0초다.
-          // **모든** 엔드포인트의 시계를 비운다 — 성공한 곳만 비우면 1차 실패→백업 성공 뒤 1차가
+          // **모든** 엔드포인트의 판 시계를 비운다 — 성공한 곳만 비우면 1차 실패→백업 성공 뒤 1차가
           // 복구될 때 1차에 남은 이전 판 토큰의 경과시간을 다음 판이 물려받는다(predeploy codex 2026-09-29).
+          // 다음 판의 시계는 여기가 아니라 **실제 판 시작**(memory.startRun → beginRunClock)에서 잰다 —
+          // 종료 화면에서 기다린 시간이 다음 판 경과시간으로 인정되면 안 된다(같은 날 2차 지적).
+          // 인증 토큰도 같이 버린다 — 남겨 두면 판 시작 없이 온 다음 제출이 그 발급 시각(이전 판)을 시계로 쓴다.
           for (const b of ENDPOINTS) {
             runTokens.delete(b)
             sessionTokens.delete(b)
           }
-          void ensureToken(base).catch(() => undefined)
           return ((await res.json()) as { rank?: number }).rank ?? null
         }
         if (res.status !== 401) break // 400·429·5xx는 재발급으로 안 풀린다 → 다음 엔드포인트
@@ -219,6 +234,7 @@ export const memory = {
   },
   startRun(): void {
     localStorage.setItem(RUNS_KEY, String(Number(localStorage.getItem(RUNS_KEY) ?? 0) + 1))
+    void beginRunClock().catch(() => undefined)
   },
   endRun(victory: boolean, wave: number): void {
     localStorage.setItem(OUTCOME_KEY, `${victory ? 'victory' : 'died'}:${wave}`)
