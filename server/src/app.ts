@@ -361,6 +361,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
       const stored = raw ? (JSON.parse(raw) as BoardEntry[]) : []
       const { clean, dirty } = partitionBoard(stored, version)
       let board = clean
+      let keepDirty = false
       if (dirty.length > 0) {
         // 지우기 전에 옮겨 적는다 — 격리 기록에 실패하면 청소를 포기하고 오염을 그대로 둔다.
         // (증거 없는 삭제보다 눈에 보이는 오염이 낫다. 읽기 경로는 어차피 걸러 보여준다.)
@@ -373,11 +374,16 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
         } catch (qErr) {
           console.error('leaderboard_quarantine_failed', qErr)
           board = stored
+          keepDirty = true
         }
       }
       board = [...board, entry]
       board.sort((a, b) => b.score - a.score)
-      const top = board.slice(0, 50)
+      // 격리에 실패했으면 상위 50 절단이 오염 항목을 증거 없이 지우지 않게 잘린 오염분을 되붙인다
+      // (predeploy codex 2026-09-29 3차 — 청소 포기가 절단으로 뒷문 삭제가 되던 자리).
+      const top = keepDirty
+        ? [...board.slice(0, 50), ...board.slice(50).filter((e) => dirty.includes(e))]
+        : board.slice(0, 50)
       await env.DIAG.put(key, JSON.stringify(top))
       return c.json({ ok: true, rank: top.findIndex((e) => e === entry) + 1, total: board.length })
     } catch (err) {

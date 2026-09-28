@@ -404,6 +404,25 @@ describe('이미 오염된 보드의 자가청소', () => {
     expect(await board(appFor(env), 'v9')).toMatchObject([{ name: '황도윤' }])
   })
 
+  it('격리 실패 + 보드가 50개로 꽉 차 있어도 낮은 점수의 오염 항목이 절단으로 사라지지 않는다 (predeploy codex 3차)', async () => {
+    const full = Array.from({ length: 50 }, (_, i) => ({ name: `p${i}`, score: 10_000 + i, wave: 5, at: i }))
+    full[49] = { name: 'test-ux-revi', score: 1, wave: 1, at: 99 }
+    const { env, kv } = envWith(JSON.stringify(full))
+    const put = env.DIAG!.put
+    env.DIAG!.put = async (k: string, v: string) => {
+      if (k.endsWith(':quarantine')) throw new Error('kv down')
+      return put(k, v)
+    }
+    const app = appFor(env)
+    const token = await tokenIssuedAgo(10 * 60 * 1000)
+    const res = await app.request(
+      scorePost({ name: '아빠', score: 164_000, wave: 9, version: 'v9' }, { 'x-session-token': token }),
+    )
+    expect(res.status).toBe(200)
+    const stored = JSON.parse(kv.get('leaderboard:v9')!) as { name: string }[]
+    expect(stored.map((e) => e.name)).toContain('test-ux-revi')
+  })
+
   it('격리 기록에 실패하면 청소하지 않는다 — 증거 없는 삭제보다 눈에 보이는 오염이 낫다', async () => {
     const { env, kv } = envWith(pollutedBoard)
     const put = env.DIAG!.put
