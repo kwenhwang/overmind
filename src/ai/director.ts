@@ -64,7 +64,11 @@ async function ensureToken(base: string): Promise<string> {
  * memory.startRun()이 매 판 시작에 부른다. 모든 엔드포인트를 데우는 이유는 initSession과 같다
  * (백업으로 넘어간 뒤 제출 직전에 받으면 시계가 0초라 정상 점수가 too_fast로 거절된다).
  */
+/** 판 세대 — 이전 판의 늦게 끝난 제출이 새 판이 받아 둔 시계를 지우지 못하게 한다 */
+let runGen = 0
+
 export async function beginRunClock(): Promise<void> {
+  runGen++
   for (const b of ENDPOINTS) {
     runTokens.delete(b)
     sessionTokens.delete(b)
@@ -150,6 +154,7 @@ export function isAutomatedSession(): boolean {
 export async function submitScore(name: string, score: number, wave: number, version: string): Promise<number | null> {
   if (isAutomatedSession()) return null // 자동화 판은 공개 보드에 안 올린다 (T-2026W38-396)
   const body = JSON.stringify({ name, score, wave, version })
+  const gen = runGen
   for (const base of ENDPOINTS) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -174,9 +179,12 @@ export async function submitScore(name: string, score: number, wave: number, ver
           // 다음 판의 시계는 여기가 아니라 **실제 판 시작**(memory.startRun → beginRunClock)에서 잰다 —
           // 종료 화면에서 기다린 시간이 다음 판 경과시간으로 인정되면 안 된다(같은 날 2차 지적).
           // 인증 토큰도 같이 버린다 — 남겨 두면 판 시작 없이 온 다음 제출이 그 발급 시각(이전 판)을 시계로 쓴다.
-          for (const b of ENDPOINTS) {
-            runTokens.delete(b)
-            sessionTokens.delete(b)
+          // 단, 그사이 새 판이 시작됐으면(RETRY 즉시) 새 판의 시계를 건드리지 않는다(predeploy codex 4차).
+          if (gen === runGen) {
+            for (const b of ENDPOINTS) {
+              runTokens.delete(b)
+              sessionTokens.delete(b)
+            }
           }
           return ((await res.json()) as { rank?: number }).rank ?? null
         }

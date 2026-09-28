@@ -86,6 +86,37 @@ describe('점수 제출 세션 토큰', () => {
     expect(runTokenOf(posts[1]!)).toBe('tok-2') // 두 번째 판은 판 시작에 받은 새 시계로 센다
   })
 
+  it('이전 판 제출이 늦게 성공해도 그사이 시작한 새 판의 시계를 지우지 않는다 (predeploy codex 4차)', async () => {
+    let issued = 0
+    let releaseScore: () => void = () => undefined
+    const gate = new Promise<void>((r) => { releaseScore = r })
+    let scorePosts = 0
+    const calls = mockFetch((url) => {
+      if (url.endsWith('/session')) return json({ token: `tok-${++issued}` })
+      return json({ ok: true, rank: 1 })
+    })
+    // 첫 제출만 응답을 늦춘다
+    const baseFetch = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/score') && ++scorePosts === 1) await gate
+      return baseFetch(url, init)
+    })
+    const ls = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v) })
+    const { submitScore, memory } = await import('../../src/ai/director')
+    const pending = submitScore('플레이어', 1000, 2, 'v11') // 이전 판 제출(지연)
+    await new Promise((r) => setTimeout(r, 0))
+    memory.startRun() // 즉시 RETRY — 새 판 시계(tok-2)
+    await new Promise((r) => setTimeout(r, 0))
+    releaseScore()
+    await pending
+    await submitScore('플레이어', 2000, 3, 'v11')
+    const posts = calls.filter((c) => c.url === `${PROXY}/score`)
+    const runTokenOf = (call: Call) =>
+      (call.init?.headers as Record<string, string> | undefined)?.['x-run-token']
+    expect(runTokenOf(posts[1]!)).toBe('tok-2')
+  })
+
   it('판 시작 없이 온 다음 제출은 이전 판 토큰을 시계로 쓰지 않는다', async () => {
     let issued = 0
     const calls = mockFetch((url) =>
