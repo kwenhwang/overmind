@@ -32,6 +32,40 @@ export async function issueToken(secret: string): Promise<string> {
   return `${ts}.${await hmac(secret, ts)}`
 }
 
+/**
+ * 서명이 이미 검증된 토큰에서 발급 시각(ms)을 꺼낸다 — 형식이 아니면 null.
+ * 발급 시각은 SECRET으로 서명된 값이라 클라이언트가 위조할 수 없다. /score가 이걸
+ * '그 사이에 실제로 얼마나 벌 수 있었나'의 기준 시계로 쓴다 (T-2026W37-244).
+ */
+export function tokenIssuedAt(token: string | undefined): number | null {
+  if (!token) return null
+  const dot = token.indexOf('.')
+  if (dot < 0) return null
+  const issued = Number(token.slice(0, dot))
+  return Number.isFinite(issued) ? issued : null
+}
+
+/**
+ * 서명만 검증한다 — TTL은 보지 않는다. '이 시각에 우리가 발급한 토큰이다'라는 사실만 필요한
+ * 곳(=/score의 판 시작 시계)에서 쓴다. 인증 통과에는 절대 쓰지 마라 (T-2026W37-244).
+ */
+export async function verifyTokenSignature(secret: string, token: string | undefined): Promise<boolean> {
+  if (!token) return false
+  const dot = token.indexOf('.')
+  if (dot < 0) return false
+  const ts = token.slice(0, dot)
+  const issued = Number(ts)
+  if (!Number.isFinite(issued) || issued > Date.now() + 60_000) return false
+  return constantTimeEq(token.slice(dot + 1), await hmac(secret, ts))
+}
+
+function constantTimeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
 export async function verifyToken(secret: string, token: string | undefined): Promise<boolean> {
   if (!token) return false
   const dot = token.indexOf('.')

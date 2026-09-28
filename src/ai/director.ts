@@ -21,6 +21,17 @@ const TOKEN_MAX_AGE_MS = 25 * 60 * 1000
 // 1번 프록시의 토큰을 2번 프록시에 보내면 무조건 401이고, 재발급을 항상 1번에서 시작하면
 // 백업 프록시로의 페일오버가 영영 못 뚫린다(codex 교차검증 지적 2026-09-07).
 const sessionTokens = new Map<string, { token: string; issuedAt: number }>()
+/**
+ * 지금 판의 '시작 시계'로 쓸 토큰 — 점수 제출 시 x-run-token으로 함께 보낸다.
+ * 인증 토큰은 25분마다 갱신되므로 그것만 보내면 긴 세션에서 판 도중 갱신이 일어나
+ * 방금 번 점수가 서버의 too_fast 상한에 걸린다(codex 교차검증 지적 2026-09-13).
+ * 서버는 더 이른 쪽만 시계로 채택하므로 이 헤더는 상한을 좁힐 뿐 넓히지 않는다.
+ *
+ * 제출에 성공하면 판이 끝난 것이므로 시계를 비운다 — 안 그러면 다음 판이 **이전 판의
+ * 경과시간까지 물려받아** 상한이 헐거워진다(같은 지적 3회차). 다음 판은 그 시점에
+ * 새로 받는 토큰부터 시간을 센다.
+ */
+const runTokens = new Map<string, string>()
 
 /** 해당 엔드포인트의 유효 토큰 보장 — 없거나 오래됐으면 재발급. 실패해도 빈 문자열(요청은 그대로 시도) */
 async function ensureToken(base: string): Promise<string> {
@@ -32,6 +43,7 @@ async function ensureToken(base: string): Promise<string> {
       const token = ((await res.json()) as { token?: string }).token ?? ''
       if (token) {
         sessionTokens.set(base, { token, issuedAt: Date.now() })
+        if (!runTokens.has(base)) runTokens.set(base, token)
         return token
       }
     }
@@ -41,11 +53,31 @@ async function ensureToken(base: string): Promise<string> {
   return cached?.token ?? ''
 }
 
-/** 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작) */
-export async function initSession(): Promise<void> {
-  for (const base of ENDPOINTS) {
-    if (await ensureToken(base)) return
+/**
+ * 게임 시작 시 1회 — 프록시에서 단기 서명 토큰을 받아둔다 (없어도 폴백으로 동작).
+ * **모든** 엔드포인트를 미리 데운다: 첫 프록시가 죽어 백업으로 넘어갈 때 토큰을 제출 직전에
+ * 받으면 판 시작 시계(x-run-token)가 0초가 되어 정상 점수가 too_fast로 거절된다
+ * (codex 교차검증 지적 2026-09-13).
+ */
+/**
+ * 판 시작 시계를 **지금** 연다 — 모든 엔드포인트의 토큰을 새로 받아 판 시작 토큰으로 삼는다.
+ * memory.startRun()이 매 판 시작에 부른다. 모든 엔드포인트를 데우는 이유는 initSession과 같다
+ * (백업으로 넘어간 뒤 제출 직전에 받으면 시계가 0초라 정상 점수가 too_fast로 거절된다).
+ */
+/** 판 세대 — 이전 판의 늦게 끝난 제출이 새 판이 받아 둔 시계를 지우지 못하게 한다 */
+let runGen = 0
+
+export async function beginRunClock(): Promise<void> {
+  runGen++
+  for (const b of ENDPOINTS) {
+    runTokens.delete(b)
+    sessionTokens.delete(b)
   }
+  await initSession()
+}
+
+export async function initSession(): Promise<void> {
+  await Promise.all(ENDPOINTS.map((base) => ensureToken(base).catch(() => '')))
 }
 
 /**
@@ -87,20 +119,80 @@ export interface ScoreEntry {
   at: number
 }
 
-/** 점수 제출 → 순위 반환. version별로 리더보드 분리(밸런스 변경 시 점수 비교 공정성) */
+/**
+ * 점수 제출 → 순위 반환. version별로 리더보드 분리(밸런스 변경 시 점수 비교 공정성).
+ * 업로드 경로와 같은 세션 토큰을 붙인다 (2026-09-13) — 서버가 /score에도 토큰을 요구하게
+ * 됐기 때문이다(무인증 시절엔 curl로 위조 점수를 넣을 수 있었다). 401이면 토큰을 버리고
+ * 딱 1회 재발급 후 재시도한다: 30분을 넘긴 긴 판의 제출이 조용히 유실되면 안 된다.
+ *
+ * 서버는 점수 상한을 '토큰 발급 이후 벌 수 있었을 최대치'로 재므로(too_fast), 인증 토큰과
+ * 별개로 이 탭이 처음 받은 토큰을 x-run-token에 실어 판 시작 시계를 알려준다.
+ */
+/**
+ * 자동화 세션(헤드리스 QA·야간 감사 렌즈·녹화/벤치 도구) 감지 — 점수 제출만 끊는다.
+ *
+ * 계기(T-2026W38-396, 2026-09-19): 우리 UX 감사 렌즈가 라이브를 헤드리스로 플레이하고
+ * `test-ux-revi` 1점을 v11 공개 보드에 남겨 6일을 버텼다. 감사는 계속 돌아야 하고 플레이도
+ * 그대로 검증돼야 하므로, 게임을 막지 않고 **제출 한 곳만** 막는다.
+ * 서버 겹(예약 이름 400 + 자가청소)은 server/src/app.ts에 따로 있다 — curl 직격은 그쪽이 맡는다.
+ */
+export function isAutomatedSession(): boolean {
+  try {
+    const nav = (globalThis as { navigator?: Navigator & { webdriver?: boolean } }).navigator
+    if (nav?.webdriver) return true
+    if (/headless|playwright|puppeteer|phantom|selenium|lighthouse|crawler|bot\b/i.test(nav?.userAgent ?? '')) return true
+    const search = (globalThis as { location?: { search?: string } }).location?.search
+    if (!search) return false
+    const q = new URLSearchParams(search)
+    // 우리 헤드리스 하네스 플래그 + 판을 왜곡하는 개발 치트(배속·자동조준)
+    return ['record', 'norender', 'rl', 'probe', 'bench', 'autostart', 'timescale', 'autoaim'].some((k) => q.has(k))
+  } catch {
+    return false // 감지에 실패하면 막지 않는다 — 사람의 점수를 잃는 쪽이 더 나쁘다
+  }
+}
+
 export async function submitScore(name: string, score: number, wave: number, version: string): Promise<number | null> {
+  if (isAutomatedSession()) return null // 자동화 판은 공개 보드에 안 올린다 (T-2026W38-396)
+  const body = JSON.stringify({ name, score, wave, version })
+  const gen = runGen
   for (const base of ENDPOINTS) {
-    try {
-      const res = await fetch(`${base}/score`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, score, wave, version }),
-        signal: AbortSignal.timeout(6000),
-      })
-      if (!res.ok) continue
-      return ((await res.json()) as { rank?: number }).rank ?? null
-    } catch {
-      /* 다음 */
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const token = await ensureToken(base)
+        const res = await fetch(`${base}/score`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-session-token': token,
+            // 판 시작 시계 — 이번 판이 시작될 때 들고 있던 토큰(만료됐어도 서명은 유효하다)
+            'x-run-token': runTokens.get(base) ?? token,
+          },
+          body,
+          signal: AbortSignal.timeout(6000),
+        })
+        if (res.ok) {
+          // 판 종료 — 다음 판의 시계는 여기서 다시 시작한다(이전 판 시간 물림 방지).
+          // 캐시된 토큰을 그대로 두면 그 토큰의 발급 시각(최대 25분 전)을 물려받으므로
+          // 인증 토큰까지 버리고 새로 받는다 — 다음 판은 '지금'부터 0초다.
+          // **모든** 엔드포인트의 판 시계를 비운다 — 성공한 곳만 비우면 1차 실패→백업 성공 뒤 1차가
+          // 복구될 때 1차에 남은 이전 판 토큰의 경과시간을 다음 판이 물려받는다(predeploy codex 2026-09-29).
+          // 다음 판의 시계는 여기가 아니라 **실제 판 시작**(memory.startRun → beginRunClock)에서 잰다 —
+          // 종료 화면에서 기다린 시간이 다음 판 경과시간으로 인정되면 안 된다(같은 날 2차 지적).
+          // 인증 토큰도 같이 버린다 — 남겨 두면 판 시작 없이 온 다음 제출이 그 발급 시각(이전 판)을 시계로 쓴다.
+          // 단, 그사이 새 판이 시작됐으면(RETRY 즉시) 새 판의 시계를 건드리지 않는다(predeploy codex 4차).
+          if (gen === runGen) {
+            for (const b of ENDPOINTS) {
+              runTokens.delete(b)
+              sessionTokens.delete(b)
+            }
+          }
+          return ((await res.json()) as { rank?: number }).rank ?? null
+        }
+        if (res.status !== 401) break // 400·429·5xx는 재발급으로 안 풀린다 → 다음 엔드포인트
+        sessionTokens.delete(base)
+      } catch {
+        break // 네트워크·타임아웃 → 다음 엔드포인트
+      }
     }
   }
   return null
@@ -150,6 +242,7 @@ export const memory = {
   },
   startRun(): void {
     localStorage.setItem(RUNS_KEY, String(Number(localStorage.getItem(RUNS_KEY) ?? 0) + 1))
+    void beginRunClock().catch(() => undefined)
   },
   endRun(victory: boolean, wave: number): void {
     localStorage.setItem(OUTCOME_KEY, `${victory ? 'victory' : 'died'}:${wave}`)
