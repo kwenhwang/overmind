@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { ARENA_RADIUS, BOSS, PLAYER } from './config'
-import { instantiate, collectMats, flashMats, getAnimations, findClip } from './models'
+import { instantiate, collectMats, flashMats, getAnimations, findClip, EMISSIVE_PEAK } from './models'
 import { sfx } from './sfx'
 import type { Player } from './player'
 import type { ProjectilePool } from './projectiles'
@@ -10,6 +10,9 @@ import type { BossDesign } from '../ai/schema'
 const _toPlayer = new THREE.Vector3()
 const _dir = new THREE.Vector3()
 const _predict = new THREE.Vector3()
+
+/** 피격·무적·윈드업 펄스가 기본 발광 위에 더할 수 있는 최대치 (톤매핑 포화 방지) */
+const BOSS_GLOW_HEADROOM = 0.8
 
 type BossAttack = 'radial_burst' | 'targeted_slam' | 'charge'
 
@@ -31,6 +34,10 @@ export class Boss {
   private ring2: THREE.Object3D | null = null
   private shards: THREE.Object3D | null = null
   private mats: THREE.MeshStandardMaterial[] = []
+  /** 검증용 — 발광 포화 계측(도구 tools/_bloom-probe.mjs)이 읽는다 */
+  get debugMats(): THREE.MeshStandardMaterial[] {
+    return this.mats
+  }
   private baseIntensities: number[] = []
   pos = new THREE.Vector3(0, 0, -8)
   hp: number = BOSS.hp
@@ -109,7 +116,7 @@ export class Boss {
         new THREE.MeshStandardMaterial({
           color: 0x1a0b0b,
           emissive: 0xff5f2e,
-          emissiveIntensity: 1.8,
+          emissiveIntensity: EMISSIVE_PEAK, // 1.8→상한: 폴백 도형도 같은 천장(흰 덩어리 방지)
           roughness: 0.3,
           metalness: 0.5,
         }),
@@ -132,9 +139,15 @@ export class Boss {
     scene.add(this.root)
   }
 
+  /**
+   * 발광 펄스 — 기본 강도에 delta를 더한다. delta는 상한(GLOW_HEADROOM)으로 자른다:
+   * 무적 펄스(최대 +2.7)·차지 윈드업(+2.2)을 그대로 더하면 코어·눈이 다시 톤매핑 천장에
+   * 붙어 형태가 사라진다(흰 덩어리). 상한 안에서도 밝기 변화는 눈에 보인다.
+   */
   private setGlow(delta: number): void {
+    const capped = Math.min(delta, BOSS_GLOW_HEADROOM)
     this.mats.forEach((m, i) => {
-      m.emissiveIntensity = this.baseIntensities[i] + delta
+      m.emissiveIntensity = Math.max(0, this.baseIntensities[i] + capped)
     })
   }
 
