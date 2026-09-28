@@ -234,15 +234,34 @@ describe('제출 도배 — per-IP 리미터', () => {
     const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
     const token = await issueToken(SECRET)
     const mine = `10.9.9.${++ipSeq}`
-    const post = (xff: string) =>
+    // 앞단 프록시가 실제 접속 IP를 **마지막**에 덧붙인다 — 앞쪽은 클라이언트가 적어 보낸 값이다
+    const post = (realIp: string, spoof = '1.2.3.4') =>
       new Request('http://x/score', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-forwarded-for': `${xff}, 10.0.0.1`, 'x-session-token': token },
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': `${spoof}, ${realIp}`, 'x-session-token': token },
         body: JSON.stringify({ score: 100, wave: 1, version: 'v11' }),
       })
     for (let i = 0; i < 11; i++) await app.request(post(mine)) // 남이 창을 다 쓴다
     const others = await app.request(post(`10.9.8.${++ipSeq}`))
     expect(others.status).toBe(200) // 다른 사용자는 멀쩡해야 한다
+  })
+
+  it('XFF 첫 항목을 바꿔 보내도 리미터를 못 우회한다 (predeploy codex 2026-09-29)', async () => {
+    const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
+    const token = await issueToken(SECRET)
+    const real = `10.9.7.${++ipSeq}`
+    const statuses: number[] = []
+    for (let i = 0; i < 12; i++) {
+      const res = await app.request(
+        new Request('http://x/score', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-forwarded-for': `6.6.6.${i}, ${real}`, 'x-session-token': token },
+          body: JSON.stringify({ score: 100 + i, wave: 1, version: 'v11' }),
+        }),
+      )
+      statuses.push(res.status)
+    }
+    expect(statuses.slice(10)).toEqual([429, 429])
   })
 
   it('같은 IP로 10회를 넘기면 429', async () => {
@@ -315,6 +334,25 @@ describe('자동화 제출 차단 — 예약 이름', () => {
   })
 })
 
+describe('예약 이름은 낱말 경계로만 — 정상 이름을 자르지 않는다 (predeploy codex 2026-09-29)', () => {
+  it.each(['contest', 'robot', 'latest킹', 'Abbott'])('%s 는 통과한다', async (name) => {
+    const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
+    const token = await issueToken(SECRET)
+    const res = await app.request(
+      scorePost({ name, score: 100, wave: 1, version: 'v11' }, { 'x-session-token': token }),
+    )
+    expect(res.status).toBe(200)
+  })
+  it.each(['qa-probe-p0', 'test-ux-revi', 'bot', 'my_test', 'Headless 1', '테스트'])('%s 는 막힌다', async (name) => {
+    const app = appFor(fakeEnv({ SESSION_SECRET: SECRET }))
+    const token = await issueToken(SECRET)
+    const res = await app.request(
+      scorePost({ name, score: 100, wave: 1, version: 'v11' }, { 'x-session-token': token }),
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('이미 오염된 보드의 자가청소', () => {
   /** 사고 당시 라이브 KV 그대로 — 위조 점수 1위 + 프로브 이름 잔류 + 진짜 기록들 */
   const pollutedBoard = JSON.stringify([
@@ -356,6 +394,14 @@ describe('이미 오염된 보드의 자가청소', () => {
     expect(stored.map((e) => e.name)).toEqual(['황도윤', '아빠'])
     const quarantined = JSON.parse(kv.get('leaderboard:v9:quarantine')!) as { name: string }[]
     expect(quarantined.map((e) => e.name).sort()).toEqual(['qa-probe-p0', 'test-ux-revi'])
+  })
+
+  it('저장된 wave가 가짜로 커도(999) 상한은 웨이브 11로 판정한다 — 필터 우회 불가 (predeploy codex 2026-09-29)', async () => {
+    const { env } = envWith(JSON.stringify([
+      { name: '위조', score: 5_000_000, wave: 999, at: 1 },
+      { name: '황도윤', score: 166_850, wave: 9, at: 2 },
+    ]))
+    expect(await board(appFor(env), 'v9')).toMatchObject([{ name: '황도윤' }])
   })
 
   it('격리 기록에 실패하면 청소하지 않는다 — 증거 없는 삭제보다 눈에 보이는 오염이 낫다', async () => {

@@ -143,8 +143,12 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
    * cf-connecting-ip만 읽으면 헤더가 없는 런타임에서 **모든 사용자가 한 버킷**('unknown')에
    * 묶여 남의 제출이 내 429가 된다(codex 교차검증 지적 2026-09-13). /directive와 같은 해석을 쓴다.
    */
+  //
+  // XFF는 **마지막** 항목을 쓴다(predeploy codex 2026-09-29, T-2026W38-396): 첫 항목은 클라이언트가
+  // 마음대로 적어 보낼 수 있어 헤더만 바꾸면 per-IP 제한을 무제한 우회한다. 마지막 항목은 우리 앞단
+  // 프록시(nginx 등)가 덧붙인 직전 홉이라 클라이언트가 못 고친다. CF 워커는 cf-connecting-ip가 우선이다.
   const clientIp = (c: Context) =>
-    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',').pop()?.trim() ?? 'unknown'
 
   // 업로드 도배 방지 — LLM 경로와 같은 per-IP 창을 쓴다(별도 예산이 아니라 남용 방지).
   const uploadThrottled = (c: Context) => rateLimited(`upload:${clientIp(c)}`)
@@ -253,8 +257,10 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
    *       배포만 하면 저절로 청소되는 쪽을 골랐다 — 수동 KV 수술은 자격(CF 토큰)이 있는 사람만 할 수 있고,
    *       그 대기 때문에 v11 오염이 6일을 살아남았다. 다만 **지우지는 않는다**: 격리 키에 옮겨 적고 나서만 뺀다.
    */
+  // 영문 낱말은 **낱말 경계**로만 본다 — 부분 문자열로 보면 contest·robot 같은 정상 이름이 거절되고
+  // 기존 기록이 오염으로 오판돼 격리된다(predeploy codex 2026-09-29). 경계 = 영숫자가 아닌 글자·양끝.
   const RESERVED_NAME =
-    /(qa[-_ ]?probe|probe|테스트|test|bot|audit|e2e|smoke|crawler|headless|playwright|puppeteer|selenium|lighthouse)/i
+    /(테스트|(^|[^a-z0-9])(qa[-_ ]?probe|probe|test|bot|audit|e2e|smoke|crawler|headless|playwright|puppeteer|selenium|lighthouse)(?=$|[^a-z0-9]))/i
   /** 자동화가 점수를 넣어도 되는 유일한 버전 키 — 공개 보드가 아니라 모래상자다 */
   const SANDBOX_VERSION = 'sandbox'
   /** 격리 보관 상한 — 증거는 남기되 KV 값이 무한히 자라지 않게 */
@@ -271,7 +277,8 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   /** 공개 보드에 있으면 안 되는 항목 — 위조 점수(현행 상한 초과)이거나 자동화 이름 */
   const isPolluted = (e: BoardEntry): boolean =>
     !Number.isFinite(e?.score) ||
-    e.score > SCORE_PER_WAVE_CAP * Math.max(1, Math.floor(Number(e?.wave) || 0)) ||
+    // 저장된 wave도 제출 경로와 같이 11로 묶는다 — 가짜 큰 wave가 상한을 같이 키워 필터를 우회하면 안 된다
+    e.score > SCORE_PER_WAVE_CAP * Math.max(1, Math.min(11, Math.floor(Number(e?.wave) || 0))) ||
     RESERVED_NAME.test(String(e?.name ?? ''))
 
   /** 저장된 보드를 깨끗한 것/오염된 것으로 가른다 (모래상자 버전은 원본 그대로 둔다) */
@@ -397,7 +404,7 @@ export function createApp(getEnv: (c: { env: unknown }) => Env) {
   app.post('/directive', async (c) => {
     const env = getEnv(c)
     const ip =
-      c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
+      clientIp(c)
 
     if (rateLimited(ip)) return c.json({ fallback: true, reason: 'rate_limited' }, 429)
 

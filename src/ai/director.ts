@@ -156,8 +156,12 @@ export async function submitScore(name: string, score: number, wave: number, ver
           // 판 종료 — 다음 판의 시계는 여기서 다시 시작한다(이전 판 시간 물림 방지).
           // 캐시된 토큰을 그대로 두면 그 토큰의 발급 시각(최대 25분 전)을 물려받으므로
           // 인증 토큰까지 버리고 새로 받는다 — 다음 판은 '지금'부터 0초다.
-          runTokens.delete(base)
-          sessionTokens.delete(base)
+          // **모든** 엔드포인트의 시계를 비운다 — 성공한 곳만 비우면 1차 실패→백업 성공 뒤 1차가
+          // 복구될 때 1차에 남은 이전 판 토큰의 경과시간을 다음 판이 물려받는다(predeploy codex 2026-09-29).
+          for (const b of ENDPOINTS) {
+            runTokens.delete(b)
+            sessionTokens.delete(b)
+          }
           void ensureToken(base).catch(() => undefined)
           return ((await res.json()) as { rank?: number }).rank ?? null
         }
