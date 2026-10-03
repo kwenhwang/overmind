@@ -195,6 +195,17 @@ export class Game {
       ;(window as unknown as Record<string, unknown>).__killBoss = () => this.boss?.takeDamage(99999)
       // 완주(승리) 경로를 헤드리스로 재기 위한 훅 — 입력 없는 검증 봇은 보스 접촉으로 먼저 죽는다.
       ;(window as unknown as Record<string, unknown>).__heal = () => { if (this.player) this.player.hp = this.player.stats.maxHp }
+      ;(window as unknown as Record<string, unknown>).__bossMats = () => this.boss?.debugMats ?? []
+      ;(window as unknown as Record<string, unknown>).__bossHit = (dmg = 1) => this.boss?.takeDamage(dmg as number)
+      // World가 먼저 등록한 __setNoRender는 월드 게이트만 푼다 — Game도 자체 게이트로 render()를
+      // 건너뛰므로 ?norender 캡처가 검은 프레임으로 나왔다. 두 게이트를 한 번에 여닫는다.
+      const worldSetNoRender = (window as unknown as Record<string, unknown>).__setNoRender as
+        | ((v: boolean) => void)
+        | undefined
+      ;(window as unknown as Record<string, unknown>).__setNoRender = (v: boolean) => {
+        this.noRender = v
+        worldSetNoRender?.(v)
+      }
       ;(window as unknown as Record<string, unknown>).__bossDbg = () =>
         this.boss
           ? {
